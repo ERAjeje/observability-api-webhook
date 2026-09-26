@@ -13,6 +13,7 @@ import (
 	"monitor/internal/auth"
 	"monitor/internal/broker"
 	"monitor/internal/domain"
+	"monitor/internal/settings"
 	"monitor/internal/storage"
 )
 
@@ -27,6 +28,7 @@ type EngineHooks interface {
 type Config struct {
 	Auth         *auth.Service
 	Broker       *broker.Broker
+	Settings     *settings.Service
 	SSEHeartbeat time.Duration
 	AllowPrivate bool // libera faixas internas no teste de conectividade
 	AuthRateMax  int
@@ -40,6 +42,7 @@ type Server struct {
 	eng          EngineHooks
 	auth         *auth.Service
 	broker       *broker.Broker
+	settings     *settings.Service
 	sseHeartbeat time.Duration
 	allowPrivate bool
 	authLimiter  *RateLimiter
@@ -56,6 +59,7 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 		eng:          eng,
 		auth:         cfg.Auth,
 		broker:       cfg.Broker,
+		settings:     cfg.Settings,
 		sseHeartbeat: cfg.SSEHeartbeat,
 		allowPrivate: cfg.AllowPrivate,
 		authLimiter:  NewRateLimiter(cfg.AuthRateMax, cfg.AuthRateWin),
@@ -81,11 +85,12 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 		r.Post("/login", s.login)
 	})
 
-	// Público (status page — T3.4).
+	// Público (status page — T3.4) + config de marca (RF-023).
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.Timeout(30 * time.Second))
 		r.Get("/status", s.publicStatus)
 		r.Get("/incidents", s.publicIncidents)
+		r.Get("/config", s.publicConfig)
 	})
 
 	// SSE (T3.5) — stream LONGO: SEM middleware.Timeout (RNF-009).
@@ -114,6 +119,8 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 		r.Get("/stats/series", s.statsSeries)
 		r.Get("/stats/summary", s.statsSummary)
 		r.Get("/notifications", s.listNotifications)
+		r.Get("/settings", s.getSettings)
+		r.Put("/settings", s.putSettings)
 	})
 
 	s.router = r

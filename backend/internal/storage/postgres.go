@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -487,6 +488,27 @@ func (p *PgStore) ListNotifications(ctx context.Context, endpointID int64, limit
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// ─── Settings (RF-023, T4.5) ──────────────────────────────────────────────
+
+func (p *PgStore) GetSetting(ctx context.Context, key string) (json.RawMessage, error) {
+	var raw json.RawMessage
+	err := p.pool.QueryRow(ctx,
+		`SELECT value FROM app_settings WHERE key=$1`, key).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return raw, err
+}
+
+func (p *PgStore) SetSetting(ctx context.Context, key string, value json.RawMessage) error {
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO app_settings (key, value, updated_at)
+		VALUES ($1,$2, now())
+		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
+		key, value)
+	return err
 }
 
 // ─── Partições ────────────────────────────────────────────────────────────

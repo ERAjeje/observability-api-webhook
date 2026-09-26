@@ -21,6 +21,7 @@ import (
 	"monitor/internal/broker"
 	"monitor/internal/checker"
 	"monitor/internal/domain"
+	"monitor/internal/settings"
 	"monitor/internal/storage"
 )
 
@@ -40,6 +41,12 @@ type Config struct {
 	AllowPrivate bool          // reusa a política anti-SSRF do checker (S-01)
 }
 
+// AlertsReader fornece a configuração de alertas salva no painel (T4.5).
+// O bool indica se há valor SALVO (false = fallback para env).
+type AlertsReader interface {
+	Alerts(ctx context.Context) (settings.Alerts, bool, error)
+}
+
 // Notifier assina o broker e despacha alertas.
 type Notifier struct {
 	cfg    Config
@@ -47,6 +54,8 @@ type Notifier struct {
 	broker *broker.Broker
 	log    *slog.Logger
 	http   *http.Client
+
+	alerts AlertsReader // opcional — settings dinâmicos (T4.5)
 
 	mu        sync.Mutex
 	lastAlert map[int64]time.Time // supressão por endpoint
@@ -72,6 +81,35 @@ func New(cfg Config, store storage.Store, br *broker.Broker, log *slog.Logger) *
 		Timeout:   cfg.Timeout,
 	}
 	return n
+}
+
+// SetAlertsReader liga o notifier aos settings dinâmicos do painel (T4.5):
+// a cada dispatch a config efetiva é resolvida com fallback para env.
+func (n *Notifier) SetAlertsReader(r AlertsReader) { n.alerts = r }
+
+// effective resolve a config usada no dispatch: settings salvos (se houver
+// reader) com fallback para os defaults env do config. Campos de um valor
+// salvo são autoritativos (ex.: webhook limpo pelo admin desliga o canal).
+func (n *Notifier) effective(ctx context.Context) settings.Alerts {
+	eff := settings.DefaultAlerts(n.cfg.WebhookURL, n.cfg.ToEmail, n.cfg.Suppression)
+	eff.Enabled = n.cfg.Enabled
+	if n.alerts == nil {
+		return eff
+	}
+	a, saved, err := n.alerts.Alerts(ctx)
+	if err != nil {
+		n.log.Warn("notifier: settings de alertas indisponível; usando env", "err", err)
+		return eff
+	}
+	if saved {
+		eff.Enabled = n.cfg.Enabled && a.Enabled
+		eff.WebhookURL = a.WebhookURL
+		eff.ToEmail = a.ToEmail
+		if a.SuppressionSeconds > 0 {
+			eff.SuppressionSeconds = a.SuppressionSeconds
+		}
+	}
+	return eff
 }
 
 // Run bloqueia consumindo os eventos de transição até ctx cancel.
@@ -109,53 +147,68 @@ func (n *Notifier) Run(ctx context.Context) {
 // ─── Disparos ─────────────────────────────────────────────────────────────
 
 // handleStatusChanged alerta transições para DOWN/DEGRADED (RF-025), com
-// janela de supressão (RF-027/UC-04).
+// janela de supressão (RF-027/UC-04) e config efetiva dos settings (T4.5).
 func (n *Notifier) handleStatusChanged(ctx context.Context, ev broker.Event) {
+	eff := n.effective(ctx)
+	if !eff.Enabled {
+		return
+	}
 	switch ev.Status {
 	case domain.StatusDown:
-		if !n.allowAlert(ev.EndpointID) {
+		if !n.allowAlert(ev.EndpointID, time.Duration(eff.SuppressionSeconds)*time.Second) {
 			return
 		}
 		n.dispatch(ctx, ev, "down", fmt.Sprintf(
-			"🔴 %s está FORA DO AR — status: DOWN", ev.Name))
+			"🔴 %s está FORA DO AR — status: DOWN", ev.Name), eff)
 	case domain.StatusDegraded:
-		if !n.allowAlert(ev.EndpointID) {
+		if !n.allowAlert(ev.EndpointID, time.Duration(eff.SuppressionSeconds)*time.Second) {
 			return
 		}
 		n.dispatch(ctx, ev, "degraded", fmt.Sprintf(
-			"🟡 %s com latência acima do limiar — status: DEGRADED", ev.Name))
+			"🟡 %s com latência acima do limiar — status: DEGRADED", ev.Name), eff)
 	}
 }
 
 // handleIncidentOpened gera o alerta de queda com a 1ª falha confirmada
 // (RF-028). O status_changed de DOWN já cobre; aqui garantimos o incident_id.
 func (n *Notifier) handleIncidentOpened(ctx context.Context, ev broker.Event) {
-	if !n.allowAlert(ev.EndpointID) {
+	eff := n.effective(ctx)
+	if !eff.Enabled {
+		return
+	}
+	if !n.allowAlert(ev.EndpointID, time.Duration(eff.SuppressionSeconds)*time.Second) {
 		return
 	}
 	msg := fmt.Sprintf("🆘 Incidente aberto em %s (incidente #%d — DOWN)", ev.Name, ev.IncidentID)
-	n.dispatch(ctx, ev, "incident_opened", msg)
+	n.dispatch(ctx, ev, "incident_opened", msg, eff)
 }
 
 // handleIncidentClosed envia o resumo da recuperação (RF-028) — nunca
 // suprimido: resolução é informação nova.
 func (n *Notifier) handleIncidentClosed(ctx context.Context, ev broker.Event) {
+	eff := n.effective(ctx)
+	if !eff.Enabled {
+		return
+	}
 	started := time.Now().Add(-time.Duration(ev.DurationMS) * time.Millisecond)
 	if inc, err := n.store.GetIncident(ctx, ev.IncidentID); err == nil && !inc.StartedAt.IsZero() {
 		started = inc.StartedAt
 	}
 	msg := fmt.Sprintf("✅ %s recuperado — incidente #%d encerrado em %d ms (início %s)",
 		ev.Name, ev.IncidentID, ev.DurationMS, started.Format(time.RFC3339))
-	n.dispatch(ctx, ev, "incident_closed", msg)
+	n.dispatch(ctx, ev, "incident_closed", msg, eff)
 }
 
 // allowAlert aplica a janela de supressão por endpoint (RF-027).
-func (n *Notifier) allowAlert(endpointID int64) bool {
+func (n *Notifier) allowAlert(endpointID int64, suppression time.Duration) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if suppression <= 0 {
+		return true
+	}
 	now := time.Now()
 	last, ok := n.lastAlert[endpointID]
-	if ok && now.Sub(last) < n.cfg.Suppression {
+	if ok && now.Sub(last) < suppression {
 		n.log.Debug("notifier: alerta suprimido (janela)", "endpoint", endpointID)
 		return false
 	}
@@ -167,7 +220,7 @@ func (n *Notifier) allowAlert(endpointID int64) bool {
 
 // dispatch envia por todos os canais configurados em paralelo (RNF-008 —
 // falha de um canal não impede o outro) e audita cada tentativa.
-func (n *Notifier) dispatch(ctx context.Context, ev broker.Event, eventType, text string) {
+func (n *Notifier) dispatch(ctx context.Context, ev broker.Event, eventType, text string, eff settings.Alerts) {
 	payload := map[string]any{
 		"event":       eventType,
 		"endpoint_id": ev.EndpointID,
@@ -178,21 +231,21 @@ func (n *Notifier) dispatch(ctx context.Context, ev broker.Event, eventType, tex
 		"timestamp":   ev.Timestamp,
 	}
 	var wg sync.WaitGroup
-	if n.cfg.SMTPHost != "" && n.cfg.ToEmail != "" {
+	if n.cfg.SMTPHost != "" && eff.ToEmail != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			n.deliverWithAudit(ctx, ev, "email", payload, func(ctx context.Context) error {
-				return n.sendEmail(ctx, text)
+				return n.sendEmail(ctx, text, eff.ToEmail)
 			})
 		}()
 	}
-	if n.cfg.WebhookURL != "" {
+	if eff.WebhookURL != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			n.deliverWithAudit(ctx, ev, "webhook", payload, func(ctx context.Context) error {
-				return n.sendWebhook(ctx, payload)
+				return n.sendWebhook(ctx, payload, eff.WebhookURL)
 			})
 		}()
 	}
@@ -255,9 +308,9 @@ func (n *Notifier) withRetry(channel string, fn func(context.Context) error) err
 
 // ─── Webhook (Slack/Discord) ──────────────────────────────────────────────
 
-func (n *Notifier) sendWebhook(ctx context.Context, payload map[string]any) error {
+func (n *Notifier) sendWebhook(ctx context.Context, payload map[string]any, webhookURL string) error {
 	body, _ := json.Marshal(map[string]any{"text": payload["text"], "payload": payload})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.cfg.WebhookURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -275,7 +328,7 @@ func (n *Notifier) sendWebhook(ctx context.Context, payload map[string]any) erro
 
 // ─── E-mail (SMTP) ─────────────────────────────────────────────────────────
 
-func (n *Notifier) sendEmail(ctx context.Context, text string) error {
+func (n *Notifier) sendEmail(ctx context.Context, text, toEmail string) error {
 	addr := net.JoinHostPort(n.cfg.SMTPHost, fmt.Sprintf("%d", n.cfg.SMTPPort))
 
 	dialer := &net.Dialer{Timeout: n.cfg.Timeout}
@@ -313,7 +366,7 @@ func (n *Notifier) sendEmail(ctx context.Context, text string) error {
 	if err := client.Mail(n.cfg.SMTPFrom); err != nil {
 		return err
 	}
-	if err := client.Rcpt(n.cfg.ToEmail); err != nil {
+	if err := client.Rcpt(toEmail); err != nil {
 		return err
 	}
 	wr, err := client.Data()
@@ -321,7 +374,7 @@ func (n *Notifier) sendEmail(ctx context.Context, text string) error {
 		return err
 	}
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: Central de Monitoramento\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s\r\n",
-		n.cfg.SMTPFrom, n.cfg.ToEmail, text)
+		n.cfg.SMTPFrom, toEmail, text)
 	if _, err := wr.Write([]byte(msg)); err != nil {
 		_ = wr.Close()
 		return err

@@ -4,6 +4,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"monitor/internal/domain"
@@ -63,4 +64,8 @@ type Store interface {
 	// Notifications audit (RF-029)
 	CreateNotification(ctx context.Context, n domain.Notification) (int64, error)
 	ListNotifications(ctx context.Context, endpointID int64, limit int) ([]domain.Notification, error)
+
+	// Settings (RF-023, T4.5) — chave/valor jsonb. ErrNotFound se ausente.
+	GetSetting(ctx context.Context, key string) (json.RawMessage, error)
+	SetSetting(ctx context.Context, key string, value json.RawMessage) error
 }

@@ -13,6 +13,7 @@ import (
 
 	"monitor/internal/broker"
 	"monitor/internal/domain"
+	"monitor/internal/settings"
 	"monitor/internal/storage"
 )
 
@@ -45,7 +46,69 @@ func publishDown(br *broker.Broker, fn func() bool) {
 	}
 }
 
-// TestNotifier_WebhookEntregaEAudita: transição DOWN dispara webhook e grava
+// fakeReader é um settings.AlertsReader de teste.
+type fakeReader struct {
+	alerts settings.Alerts
+	saved  bool
+}
+
+func (f *fakeReader) Alerts(context.Context) (settings.Alerts, bool, error) {
+	return f.alerts, f.saved, nil
+}
+
+// TestNotifier_SettingsOverride: config salva no painel muda o destino do
+// webhook (T4.5) e clarear a URL desliga o canal mesmo com env configurado.
+func TestNotifier_SettingsOverride(t *testing.T) {
+	var calls int32
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hook.Close()
+
+	n, store, br := testNotifier(t, Config{
+		WebhookURL: "https://env.example.com/hook", // env antigo
+		Timeout:    2 * time.Second, Suppression: time.Minute,
+	})
+
+	// 1) Settings salvos apontam para o hook de teste → canal muda.
+	n.SetAlertsReader(&fakeReader{alerts: settings.Alerts{
+		Enabled: true, WebhookURL: hook.URL, SuppressionSeconds: 300,
+	}, saved: true})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go n.Run(ctx)
+	publishDown(br, func() bool { return atomic.LoadInt32(&calls) >= 1 })
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("webhook via settings: esperado 1 chamada, got %d", got)
+	}
+	cancel()
+
+	// Auditoria confirma envio no channel webhook.
+	notifs, _ := store.ListNotifications(context.Background(), 100, 10)
+	if len(notifs) != 1 || notifs[0].Channel != "webhook" || notifs[0].Status != "sent" {
+		t.Fatalf("auditoria esperada: %+v", notifs)
+	}
+
+	// 2) Admin limpou o webhook (salvo="") → canal desliga apesar do env.
+	calls = 0
+	n2, _, br2 := testNotifier(t, Config{
+		WebhookURL: "https://env.example.com/hook", Timeout: 2 * time.Second, Suppression: time.Minute,
+	})
+	n2.SetAlertsReader(&fakeReader{alerts: settings.Alerts{Enabled: true, WebhookURL: ""}, saved: true})
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	go n2.Run(ctx2)
+	br2.Publish(broker.EventStatusChanged, broker.Event{
+		Type: broker.EventStatusChanged, Timestamp: time.Now(),
+		EndpointID: 100, Name: "api-gw", Status: domain.StatusDown, From: domain.StatusUp,
+	})
+	time.Sleep(600 * time.Millisecond)
+	cancel2()
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("webhook limpo pelo settings: esperado 0 chamadas, got %d", got)
+	}
+}
+
 // auditoria com status sent (RF-026/RF-029).
 func TestNotifier_WebhookEntregaEAudita(t *testing.T) {
 	var calls int32

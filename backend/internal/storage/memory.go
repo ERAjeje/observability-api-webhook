@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"sync"
@@ -28,6 +29,7 @@ type MemStore struct {
 	nextUserID  int64
 	notifs      []domain.Notification
 	nextNotifID int64
+	settings    map[string]json.RawMessage
 }
 
 // NewMem create a nova store em memória.
@@ -38,6 +40,7 @@ func NewMem() *MemStore {
 		incidents: map[int64]domain.Incident{},
 		groups:    map[int64]domain.CheckGroup{},
 		users:     map[string]domain.User{},
+		settings:  map[string]json.RawMessage{},
 	}
 }
 
@@ -440,7 +443,7 @@ func (m *MemStore) ListNotifications(_ context.Context, endpointID int64, limit 
 	return out, nil
 }
 
-// IncidentsExport devolve todos os incidents (uso em testes/verificação).
+// ChecksExport devolve todos os checks (uso em testes/verificação).
 func (m *MemStore) ChecksExport() []domain.Check {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -467,3 +470,22 @@ var ErrNotFound = errors.New("storage: not found")
 
 // ErrConflict indica violação de unicidade (ex.: e-mail já cadastrado).
 var ErrConflict = errors.New("storage: conflict")
+
+// ─── Settings (RF-023, T4.5) ──────────────────────────────────────────────
+
+func (m *MemStore) GetSetting(_ context.Context, key string) (json.RawMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	v, ok := m.settings[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return v, nil
+}
+
+func (m *MemStore) SetSetting(_ context.Context, key string, value json.RawMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings[key] = value
+	return nil
+}

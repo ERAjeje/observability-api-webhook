@@ -19,6 +19,7 @@ import (
 	"monitor/internal/engine"
 	"monitor/internal/migrate"
 	"monitor/internal/notifier"
+	"monitor/internal/settings"
 	"monitor/internal/storage"
 )
 
@@ -81,6 +82,10 @@ func run(log *slog.Logger) error {
 		// Sem serviço de auth, o middleware nega todas as rotas admin.
 	}
 
+	// ─── Settings dinâmicos (RF-023 / T4.5) ─────────────────────────────
+	settingsSvc := settings.New(store, log, cfg.AllowPrivateTargets,
+		settings.DefaultAlerts(cfg.NotifyWebhookURL, cfg.NotifyToEmail, cfg.NotifySuppression))
+
 	// ─── Notifier (T3.7) ─────────────────────────────────────────────────
 	var notif *notifier.Notifier
 	if cfg.NotifyEnabled {
@@ -98,6 +103,7 @@ func run(log *slog.Logger) error {
 			Timeout:      cfg.NotifyTimeout,
 			AllowPrivate: cfg.AllowPrivateTargets,
 		}, store, eng.Broker(), log)
+		notif.SetAlertsReader(settingsSvc)
 		go notif.Run(ctx)
 		log.Info("notifier: ativo",
 			"email", cfg.SMTPHost != "" && cfg.NotifyToEmail != "",
@@ -112,6 +118,7 @@ func run(log *slog.Logger) error {
 		Handler: api.New(api.Config{
 			Auth:         authSvc,
 			Broker:       eng.Broker(),
+			Settings:     settingsSvc,
 			SSEHeartbeat: cfg.SSEHeartbeat,
 			AllowPrivate: cfg.AllowPrivateTargets,
 			AuthRateMax:  cfg.AuthRateMax,
