@@ -21,3 +21,6 @@ pgdata/
 
 # Go
 vendor/
+
+# Certificados TLS (gerados localmente / acme.sh) — nunca versionar chaves
+deploy/nginx/certs/
