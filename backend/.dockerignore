@@ -1,0 +1,8 @@
+# Contexto mínimo para a imagem Go.
+.git
+*.md
+docs/
+deploy/
+docker-compose.yml
+Makefile
+.env*
