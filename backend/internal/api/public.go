@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"monitor/internal/domain"
@@ -79,4 +80,54 @@ func incidentDTO(inc domain.Incident) map[string]any {
 		"duration_ms": inc.DurationMS,
 		"resolution":  inc.Resolution,
 	}
+}
+
+// publicStatsSeries expõe a série de latência/uptime de um endpoint para a
+// status page (RF-020). Dados agregados (rollups) — nunca logs brutos e nada
+// sensível (RNF-014, RNF-018).
+func (s *Server) publicStatsSeries(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	from, err := parseTimeParam(r, "from")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "from deve ser RFC3339")
+		return
+	}
+	to, err := parseTimeParam(r, "to")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "to deve ser RFC3339")
+		return
+	}
+	limit := 1440
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 1440 {
+			writeErr(w, http.StatusBadRequest, "limit deve estar entre 1 e 1440")
+			return
+		}
+		limit = n
+	}
+	items, err := s.seriesResponse(r.Context(), id, from, to, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit})
+}
+
+// publicStatsSummary expõe o resumo (uptime dia/semana/mês + percentis).
+func (s *Server) publicStatsSummary(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.summaryResponse(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -93,6 +94,31 @@ func checkDTO(c domain.Check) map[string]any {
 	}
 }
 
+// seriesResponse monta a série a partir dos rollups (RNF-014).
+func (s *Server) seriesResponse(ctx context.Context, epID int64, from, to time.Time, limit int) ([]map[string]any, error) {
+	rollups, err := s.store.ListRollups(ctx, epID, from, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(rollups))
+	for _, rl := range rollups {
+		uptime := 0.0
+		if rl.Count > 0 {
+			uptime = float64(rl.OKCount) / float64(rl.Count) * 100
+		}
+		out = append(out, map[string]any{
+			"bucket":     rl.Bucket,
+			"count":      rl.Count,
+			"ok_count":   rl.OKCount,
+			"avg_ms":     rl.AvgLatencyMS(),
+			"p50_ms":     rl.P50LatencyMS,
+			"p95_ms":     rl.P95LatencyMS,
+			"uptime_pct": round2(uptime),
+		})
+	}
+	return out, nil
+}
+
 // statsSeries devolve a série de latência/uptime a partir dos rollups
 // pré-computados (RNF-014 — nunca logs brutos).
 func (s *Server) statsSeries(w http.ResponseWriter, r *http.Request) {
@@ -121,47 +147,25 @@ func (s *Server) statsSeries(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	rollups, err := s.store.ListRollups(r.Context(), epID, from, to, limit)
+	items, err := s.seriesResponse(r.Context(), epID, from, to, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
 		return
 	}
-	out := make([]map[string]any, 0, len(rollups))
-	for _, rl := range rollups {
-		uptime := 0.0
-		if rl.Count > 0 {
-			uptime = float64(rl.OKCount) / float64(rl.Count) * 100
-		}
-		out = append(out, map[string]any{
-			"bucket":     rl.Bucket,
-			"count":      rl.Count,
-			"ok_count":   rl.OKCount,
-			"avg_ms":     rl.AvgLatencyMS(),
-			"p50_ms":     rl.P50LatencyMS,
-			"p95_ms":     rl.P95LatencyMS,
-			"uptime_pct": round2(uptime),
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out, "limit": limit})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit})
 }
 
-// statsSummary resume uptime (dia/semana/mês) e percentis atuais — RF-020.
-func (s *Server) statsSummary(w http.ResponseWriter, r *http.Request) {
-	epID, err := strconv.ParseInt(r.URL.Query().Get("endpoint_id"), 10, 64)
-	if err != nil || epID <= 0 {
-		writeErr(w, http.StatusBadRequest, "endpoint_id obrigatório")
-		return
-	}
+// summaryResponse resume uptime (dia/semana/mês) e percentis atuais — RF-020.
+func (s *Server) summaryResponse(ctx context.Context, epID int64) (map[string]any, error) {
 	now := time.Now().UTC()
-	rollups, err := s.store.ListRollups(r.Context(), epID, time.Time{}, now.Add(time.Hour), 0)
+	rollups, err := s.store.ListRollups(ctx, epID, time.Time{}, now.Add(time.Hour), 0)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
-		return
+		return nil, err
 	}
 	day := aggregateSince(rollups, now.Add(-24*time.Hour))
 	week := aggregateSince(rollups, now.Add(-7*24*time.Hour))
 	month := aggregateSince(rollups, now.Add(-30*24*time.Hour))
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"endpoint_id": epID,
 		"uptime": map[string]float64{
 			"day":   uptimePct(day),
@@ -173,7 +177,22 @@ func (s *Server) statsSummary(w http.ResponseWriter, r *http.Request) {
 			"p95": day.p95,
 			"avg": day.avg(),
 		},
-	})
+	}, nil
+}
+
+// statsSummary resume uptime (dia/semana/mês) e percentis atuais — RF-020.
+func (s *Server) statsSummary(w http.ResponseWriter, r *http.Request) {
+	epID, err := strconv.ParseInt(r.URL.Query().Get("endpoint_id"), 10, 64)
+	if err != nil || epID <= 0 {
+		writeErr(w, http.StatusBadRequest, "endpoint_id obrigatório")
+		return
+	}
+	out, err := s.summaryResponse(r.Context(), epID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type rollupAgg struct {

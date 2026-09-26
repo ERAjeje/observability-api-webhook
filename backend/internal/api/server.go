@@ -91,6 +91,10 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 		r.Get("/status", s.publicStatus)
 		r.Get("/incidents", s.publicIncidents)
 		r.Get("/config", s.publicConfig)
+		// Stats públicos por endpoint (só rollups — RNF-014): gráficos da
+		// status page (RF-020) sem exigir auth.
+		r.Get("/status/{id}/stats/summary", s.publicStatsSummary)
+		r.Get("/status/{id}/stats/series", s.publicStatsSeries)
 	})
 
 	// SSE (T3.5) — stream LONGO: SEM middleware.Timeout (RNF-009).
