@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +12,7 @@ import (
 
 	"monitor/internal/checker"
 	"monitor/internal/domain"
+	"monitor/internal/storage"
 )
 
 // endpointBody é o payload de criação/edição (RF-001..RF-005). Headers e body
@@ -47,12 +50,16 @@ func (b endpointBody) toEndpoint() (domain.Endpoint, error) {
 	if b.Active != nil {
 		active = *b.Active
 	}
+	headers := b.Headers
+	if headers == nil {
+		headers = map[string]string{} // jsonb NOT NULL — evitar NULL explícito
+	}
 	e := domain.Endpoint{
 		GroupID:          b.GroupID,
 		Name:             b.Name,
 		URL:              b.URL,
 		Method:           method,
-		Headers:          b.Headers,
+		Headers:          headers,
 		Body:             b.Body,
 		Interval:         interval,
 		Timeout:          timeout,
@@ -131,6 +138,7 @@ func (s *Server) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.store.CreateEndpoint(r.Context(), e)
 	if err != nil {
+		slog.Error("api: criar endpoint falhou", "err", err)
 		writeErr(w, http.StatusInternalServerError, "falha ao criar endpoint")
 		return
 	}
@@ -185,6 +193,9 @@ func (s *Server) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.UpdateEndpoint(r.Context(), e); mapStoreErr(w, err) {
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			slog.Error("api: atualizar endpoint falhou", "endpoint", id, "err", err)
+		}
 		return
 	}
 	// Recarrega o estado persistido (status) para manter o runtime coerente.

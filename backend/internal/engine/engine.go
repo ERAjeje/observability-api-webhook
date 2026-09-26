@@ -73,7 +73,7 @@ func New(ctx context.Context, cfg config.Config, store storage.Store, log *slog.
 		return nil, err
 	}
 	for _, ep := range eps {
-		e.runtimes[ep.ID] = &domain.EndpointRuntime{Status: ep.Status}
+		e.runtimes[ep.ID] = &domain.EndpointRuntime{Status: normalizedStatus(ep.Status)}
 	}
 
 	// Pool de workers — handler é o ciclo por job.
@@ -325,9 +325,18 @@ func (e *Engine) SyncEndpoint(ctx context.Context, ep domain.Endpoint) error {
 		rt = &domain.EndpointRuntime{}
 		e.runtimes[ep.ID] = rt
 	}
-	rt.Status = ep.Status
+	rt.Status = normalizedStatus(ep.Status)
 	e.mu.Unlock()
 	return e.store.SetNextCheckAt(ctx, ep.ID, time.Now())
+}
+
+// normalizedStatus garante que um status vazio vire "unknown" (estado inicial
+// de endpoints recém-criados — a state machine depende disso).
+func normalizedStatus(s domain.StatusClass) domain.StatusClass {
+	if s == "" {
+		return domain.StatusUnknown
+	}
+	return s
 }
 
 // DropEndpoint remove o runtime após delete (RNF-012 — remoção imediata).

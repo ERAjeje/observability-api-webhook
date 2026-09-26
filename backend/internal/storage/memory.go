@@ -53,6 +53,9 @@ func (m *MemStore) CreateEndpoint(_ context.Context, e domain.Endpoint) (int64, 
 	e.UpdatedAt = e.CreatedAt
 	m.nextEPID++
 	e.ID = m.nextEPID
+	if e.Status == "" {
+		e.Status = domain.StatusUnknown
+	}
 	m.endpoints[e.ID] = e
 	return e.ID, nil
 }
@@ -95,8 +98,13 @@ func (m *MemStore) ListDueEndpoints(_ context.Context, now time.Time, atMost int
 func (m *MemStore) UpdateEndpoint(_ context.Context, e domain.Endpoint) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.endpoints[e.ID]; !ok {
+	cur, ok := m.endpoints[e.ID]
+	if !ok {
 		return ErrNotFound
+	}
+	// Status é mantido pela state machine; body de update não deve zerá-lo.
+	if e.Status == "" {
+		e.Status = cur.Status
 	}
 	e.UpdatedAt = time.Now().UTC()
 	m.endpoints[e.ID] = e

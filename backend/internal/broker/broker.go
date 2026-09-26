@@ -10,22 +10,23 @@ import (
 	"monitor/internal/domain"
 )
 
-// Event é um evento de domínio publicado pelo engine.
+// Event é um evento de domínio publicado pelo engine. JSON em snake_case
+// para consistência com a API REST (consumido pelo SSE e pelo frontend).
 type Event struct {
-	Type       string // status_changed | incident_opened | incident_closed | rollup_updated | endpoint_removed
-	Timestamp  time.Time
-	EndpointID int64
-	Name       string
-	Status     domain.StatusClass
-	From       domain.StatusClass
-	IncidentID int64
-	DurationMS int64
+	Type       string             `json:"type"`
+	Timestamp  time.Time          `json:"timestamp"`
+	EndpointID int64              `json:"endpoint_id"`
+	Name       string             `json:"name,omitempty"`
+	Status     domain.StatusClass `json:"status,omitempty"`
+	From       domain.StatusClass `json:"from,omitempty"`
+	IncidentID int64              `json:"incident_id,omitempty"`
+	DurationMS int64              `json:"duration_ms,omitempty"`
 	// Dados de rollup (rollup_updated).
-	Bucket time.Time
-	Count  int64
-	P50MS  int64
-	P95MS  int64
-	AvgMS  int64
+	Bucket time.Time `json:"bucket,omitempty"`
+	Count  int64     `json:"count,omitempty"`
+	P50MS  int64     `json:"p50_ms,omitempty"`
+	P95MS  int64     `json:"p95_ms,omitempty"`
+	AvgMS  int64     `json:"avg_ms,omitempty"`
 }
 
 const (
