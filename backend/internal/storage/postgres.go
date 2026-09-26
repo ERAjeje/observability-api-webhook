@@ -244,7 +244,7 @@ func (p *PgStore) ensurePartition(ctx context.Context, at time.Time) error {
 	if p.lastPart == month {
 		return nil
 	}
-	start := at.UTC().Truncate(24 * time.Hour).AddDate(0, 0, -at.UTC().Day() + 1)
+	start := at.UTC().Truncate(24*time.Hour).AddDate(0, 0, -at.UTC().Day()+1)
 	end := start.AddDate(0, 1, 0)
 	_, err := p.pool.Exec(ctx, `
 		SELECT create_check_partition($1, $2, $3)`,

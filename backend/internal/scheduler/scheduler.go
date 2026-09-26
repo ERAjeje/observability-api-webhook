@@ -4,8 +4,10 @@ package scheduler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"time"
 
 	"monitor/internal/domain"
@@ -97,14 +99,23 @@ func (s *Scheduler) round(ctx context.Context, now time.Time) {
 	}
 }
 
-// ApplyJitter retorna o delay do endpoint com jitter ±fraction.
-func ApplyJitter(interval time.Duration, fraction float64) time.Duration {
+// ApplyJitter retorna o delay do endpoint com jitter ±fraction, usando
+// crypto/rand (fonte segura — gosec G404): não é aleatoriedade sensível,
+// mas evita dependência de PRNG não-semeado.
+func ApplyJitter(interval time.Duration, fraction float64) (time.Duration, error) {
 	if fraction <= 0 {
-		return interval
+		return interval, nil
 	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return interval, fmt.Errorf("jitter: falha ao ler crypto/rand: %w", err)
+	}
+	// fração uniforme em [0,1) a partir de 53 bits (mesmo formato do
+	// math/rand.Float64, mas de fonte criptográfica).
+	frac := float64(binary.BigEndian.Uint64(b[:])>>11) / float64(uint64(1)<<53)
 	amp := time.Duration(float64(interval) * fraction)
-	offset := time.Duration((rand.Float64()*2 - 1) * float64(amp))
-	return interval + offset
+	offset := time.Duration((frac*2 - 1) * float64(amp))
+	return interval + offset, nil
 }
 
 var _ = domain.StatusUnknown // referência de pacote mantida por clareza

@@ -26,19 +26,24 @@ type Outcome struct {
 }
 
 // Checker executa os requests com um transporte reutilizado e otimizado
-// (pool de conexões por host — arquitetura §3.1).
+// (pool de conexões por host — arquitetura §3.1) e guarda anti-SSRF.
 type Checker struct {
 	client *http.Client
 }
 
-// New cria um Checker com transporte tunado para checagens concorrentes.
-func New() *Checker {
+// New cria um Checker com transporte tunado e validação de destino
+// (allowPrivate libera faixas internas para lab/self-host controlado).
+func New(allowPrivate bool) *Checker {
 	tr := &http.Transport{
 		MaxIdleConns:        256,
 		MaxIdleConnsPerHost: 64,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	return &Checker{client: &http.Client{Transport: tr}}
+	return &Checker{
+		client: &http.Client{
+			Transport: &guardedTransport{base: tr, allowPrivate: allowPrivate},
+		},
+	}
 }
 
 // Run executa a checagem com timeout do endpoint (RF-009) e aplica as

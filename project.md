@@ -28,6 +28,20 @@ usuário, armazena **logs de latência/status** e fornece uma **página pública
 - Armazenamento de logs de latência/status por checagem.
 - Página pública de status em tempo real (SSE/WebSockets) com gráficos (uptime, latência, histórico).
 
+## 📌 Próximo passo — Fase 3 (API REST + SSE + Alertas)
+
+✅ **Fases 1 e 2 concluídas** (setup + core engine). Próxima etapa:
+
+- **[ ]** **T3.1** Auth JWT + bcrypt + rate limit (rotas admin)
+- **[ ]** **T3.2** CRUD REST de endpoints/grupos + teste manual de conectividade
+- **[ ]** **T3.3** API de logs/stats (rollups, P50/P95, uptime)
+- **[ ]** **T3.4** API pública de status (sem auth) + timeline de incidentes
+- **[ ]** **T3.5/T3.6** SSE `/api/v1/events` (broker + snapshot no connect + heartbeat)
+- **[ ]** **T3.7** Notifier (e-mail/webhook, supressão, retry/backoff, auditoria)
+
+> ⚠️ Antes de iniciar a Fase 3: aplicar as correções da **varredura de segurança**
+> (ver `docs/security-review.md`).
+
 ## 📌 Decisões abertas (a definir durante o desenvolvimento)
 
 - Backend: Go vs Node.js.

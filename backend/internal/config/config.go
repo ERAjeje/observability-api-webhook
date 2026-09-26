@@ -28,6 +28,10 @@ type Config struct {
 	SchedulerTick  time.Duration
 	JitterFraction float64
 
+	// Segurança de egress — SSRF guard (checker/security.go).
+	// false (default): bloqueia loopback/RFC1918/link-local/metadata cloud.
+	AllowPrivateTargets bool
+
 	// State machine — janela de confirmação N/M (RF-013, T2.1).
 	FailThreshold    int
 	SuccessThreshold int
@@ -43,20 +47,21 @@ type Config struct {
 // .env.example.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:         getEnv("HTTP_ADDR", ":8080"),
-		Env:              getEnv("ENV", "development"),
-		DBDSN:            os.Getenv("DB_DSN"),
-		AutoMigrate:      getBool("AUTO_MIGRATE", true),
-		WorkerPoolSize:   getInt("WORKER_POOL_SIZE", 20),
-		PoolQueueSize:    getInt("POOL_QUEUE_SIZE", 1000),
-		BatchSize:        getInt("MAX_BATCH_SIZE", 100),
-		BatchFlush:       time.Duration(getInt("BATCH_FLUSH_SECONDS", 1)) * time.Second,
-		SchedulerTick:    time.Duration(getInt("SCHEDULER_TICK_SECONDS", 10)) * time.Second,
-		JitterFraction:   getFloat("JITTER_FRACTION", 0.2),
-		FailThreshold:    getInt("FAIL_THRESHOLD", 3),
-		SuccessThreshold: getInt("SUCCESS_THRESHOLD", 2),
-		SSEHeartbeat:     time.Duration(getInt("SSE_HEARTBEAT_SECONDS", 15)) * time.Second,
-		JWTSecret:        os.Getenv("JWT_SECRET"),
+		HTTPAddr:            getEnv("HTTP_ADDR", ":8080"),
+		Env:                 getEnv("ENV", "development"),
+		DBDSN:               os.Getenv("DB_DSN"),
+		AutoMigrate:         getBool("AUTO_MIGRATE", true),
+		WorkerPoolSize:      getInt("WORKER_POOL_SIZE", 20),
+		PoolQueueSize:       getInt("POOL_QUEUE_SIZE", 1000),
+		BatchSize:           getInt("MAX_BATCH_SIZE", 100),
+		BatchFlush:          time.Duration(getInt("BATCH_FLUSH_SECONDS", 1)) * time.Second,
+		SchedulerTick:       time.Duration(getInt("SCHEDULER_TICK_SECONDS", 10)) * time.Second,
+		JitterFraction:      getFloat("JITTER_FRACTION", 0.2),
+		AllowPrivateTargets: getBool("ALLOW_PRIVATE_TARGETS", false),
+		FailThreshold:       getInt("FAIL_THRESHOLD", 3),
+		SuccessThreshold:    getInt("SUCCESS_THRESHOLD", 2),
+		SSEHeartbeat:        time.Duration(getInt("SSE_HEARTBEAT_SECONDS", 15)) * time.Second,
+		JWTSecret:           os.Getenv("JWT_SECRET"),
 	}
 
 	if cfg.WorkerPoolSize < 1 {

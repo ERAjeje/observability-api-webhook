@@ -24,7 +24,7 @@ func TestRun_HTTP200_OK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	out := New().Run(context.Background(), epOK(srv))
+	out := New(true).Run(context.Background(), epOK(srv))
 	if out.Result != domain.ResultOK {
 		t.Fatalf("esperado ok; got %s (%s)", out.Result, out.ErrorDetail)
 	}
@@ -39,7 +39,7 @@ func TestRun_HTTP500_Fail(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	out := New().Run(context.Background(), epOK(srv))
+	out := New(true).Run(context.Background(), epOK(srv))
 	if out.Result != domain.ResultFail || out.HTTPStatus != 500 {
 		t.Fatalf("esperado fail/500; got %s/%d", out.Result, out.HTTPStatus)
 	}
@@ -54,7 +54,7 @@ func TestRun_Timeout_Fail(t *testing.T) {
 	ep := epOK(srv)
 	ep.Timeout = 50 * time.Millisecond
 	start := time.Now()
-	out := New().Run(context.Background(), ep)
+	out := New(true).Run(context.Background(), ep)
 	if out.Result != domain.ResultFail {
 		t.Fatalf("esperado fail por timeout; got %s", out.Result)
 	}
@@ -74,7 +74,7 @@ func TestRun_ExpectStatus_Mismatch(t *testing.T) {
 
 	ep := epOK(srv)
 	ep.ExpectStatus = 200
-	out := New().Run(context.Background(), ep)
+	out := New(true).Run(context.Background(), ep)
 	if out.Result != domain.ResultFail {
 		t.Fatalf("esperado fail (201 != esperado 200); got %s", out.Result)
 	}
@@ -88,13 +88,13 @@ func TestRun_ExpectBody(t *testing.T) {
 
 	ok := epOK(srv)
 	ok.ExpectBody = "healthy"
-	if out := New().Run(context.Background(), ok); out.Result != domain.ResultOK {
+	if out := New(true).Run(context.Background(), ok); out.Result != domain.ResultOK {
 		t.Fatalf("esperado ok (body contém); got %s", out.Result)
 	}
 
 	bad := epOK(srv)
 	bad.ExpectBody = "mismatch"
-	if out := New().Run(context.Background(), bad); out.Result != domain.ResultFail {
+	if out := New(true).Run(context.Background(), bad); out.Result != domain.ResultFail {
 		t.Fatalf("esperado fail (body não contém); got %s", out.Result)
 	}
 }
@@ -108,7 +108,7 @@ func TestRun_DegradedPorLatencia(t *testing.T) {
 
 	ep := epOK(srv)
 	ep.LatencyThreshold = 50 * time.Millisecond
-	out := New().Run(context.Background(), ep)
+	out := New(true).Run(context.Background(), ep)
 	if out.Result != domain.ResultDegraded {
 		t.Fatalf("esperado degraded (latencia > limiar); got %s", out.Result)
 	}
@@ -124,7 +124,7 @@ func TestRun_HeaderEnviado(t *testing.T) {
 
 	ep := epOK(srv)
 	ep.Headers = map[string]string{"Authorization": "Bearer abc"}
-	New().Run(context.Background(), ep)
+	New(true).Run(context.Background(), ep)
 	if gotAuth != "Bearer abc" {
 		t.Fatalf("header não enviado; got %q", gotAuth)
 	}

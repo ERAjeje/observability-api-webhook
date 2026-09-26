@@ -32,23 +32,23 @@ const (
 // Endpoint representa um serviço monitorado cadastrado pelo usuário
 // (RF-001..RF-005).
 type Endpoint struct {
-	ID              int64
-	GroupID         *int64
-	Name            string
-	URL             string
-	Method          string
-	Headers         map[string]string
-	Body            string
-	Interval        time.Duration
-	Timeout         time.Duration
+	ID               int64
+	GroupID          *int64
+	Name             string
+	URL              string
+	Method           string
+	Headers          map[string]string
+	Body             string
+	Interval         time.Duration
+	Timeout          time.Duration
 	LatencyThreshold time.Duration // 0 = desabilitado (RF-004)
-	ExpectStatus    int            // 0 = qualquer 2xx/3xx (RF-010)
-	ExpectBody      string         // vazio = sem validação de conteúdo
-	Active          bool
-	Status          StatusClass // último estado persistido (snapshot/recovery)
-	NextCheckAt     time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ExpectStatus     int           // 0 = qualquer 2xx/3xx (RF-010)
+	ExpectBody       string        // vazio = sem validação de conteúdo
+	Active           bool
+	Status           StatusClass // último estado persistido (snapshot/recovery)
+	NextCheckAt      time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // Validate valida as regras de negócio de cadastro (RF-003).

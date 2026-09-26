@@ -16,9 +16,9 @@ func testLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // fakeSubmit captura jobs e devolve sucesso configurável.
 type fakeSubmit struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	accepted bool
-	jobs    []worker.Job
+	jobs     []worker.Job
 }
 
 func (f *fakeSubmit) Submit(j worker.Job) bool {
@@ -104,7 +104,10 @@ func TestScheduler_BackpressureLiberaEndpoint(t *testing.T) {
 	now := time.Now()
 	mustCreate(t, store, dueEndpoint(1, now.Add(-time.Minute)))
 
-	type marked struct{ id int64; in bool } // captura liberação
+	type marked struct {
+		id int64
+		in bool
+	} // captura liberação
 	var log []marked
 	var mu sync.Mutex
 	sub := &fakeSubmit{accepted: false} // simula queue cheia
@@ -125,7 +128,10 @@ func TestScheduler_BackpressureLiberaEndpoint(t *testing.T) {
 func TestScheduler_ApplyJitterDentroDoIntervalo(t *testing.T) {
 	base := 60 * time.Second
 	for i := 0; i < 500; i++ {
-		d := ApplyJitter(base, 0.2)
+		d, err := ApplyJitter(base, 0.2)
+		if err != nil {
+			t.Fatalf("jitter: %v", err)
+		}
 		if d < base-(20*time.Second) || d > base+(20*time.Second) {
 			t.Fatalf("jitter fora da faixa ±20%%: %v", d)
 		}

@@ -42,14 +42,17 @@ type Engine struct {
 	wg     sync.WaitGroup
 }
 
-type atomicBool struct{ mu sync.Mutex; v bool }
+type atomicBool struct {
+	mu sync.Mutex
+	v  bool
+}
 
 func (a *atomicBool) Set(b bool) { a.mu.Lock(); a.v = b; a.mu.Unlock() }
-func (a *atomicBool) Get() bool   { a.mu.Lock(); defer a.mu.Unlock(); return a.v }
+func (a *atomicBool) Get() bool  { a.mu.Lock(); defer a.mu.Unlock(); return a.v }
 
 // New constrói o engine, carregando o estado persistido dos endpoints.
 func New(ctx context.Context, cfg config.Config, store storage.Store, log *slog.Logger) (*Engine, error) {
-	check := checker.New()
+	check := checker.New(cfg.AllowPrivateTargets)
 	brok := broker.New()
 	sm := domain.NewStateMachine(cfg.FailThreshold, cfg.SuccessThreshold)
 
@@ -222,7 +225,12 @@ func (e *Engine) handleJob(parentCtx context.Context, job worker.Job) error {
 	}
 
 	// 3. Reagenda com base na conclusão + jitter (sem deriva).
-	next := now.Add(scheduler.ApplyJitter(ep.Interval, e.sched.Jitter))
+	delay, err := scheduler.ApplyJitter(ep.Interval, e.sched.Jitter)
+	if err != nil {
+		e.log.Warn("engine: jitter falhou — usando intervalo nominal", "endpoint", ep.ID, "err", err)
+		delay = ep.Interval
+	}
+	next := now.Add(delay)
 	if err := e.store.SetNextCheckAt(parentCtx, ep.ID, next); err != nil {
 		e.log.Error("engine: reagendar falhou", "endpoint", ep.ID, "err", err)
 	}
@@ -360,7 +368,7 @@ func p95(sorted []int64) int64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int(float64(len(sorted))*0.95 + 0.999) - 1
+	idx := int(float64(len(sorted))*0.95+0.999) - 1
 	if idx < 0 {
 		idx = 0
 	}

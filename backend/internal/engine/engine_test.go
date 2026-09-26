@@ -31,19 +31,21 @@ func (f *flippableServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 }
 
 // testCfg devolve uma configuração com ticks/batches curtos e jitter 0
-// (determinístico para testes).
+// (determinístico para testes). AllowPrivateTargets=true porque os testes
+// usam httptest (loopback).
 func testCfg() config.Config {
 	return config.Config{
-		WorkerPoolSize:   8,
-		PoolQueueSize:    100,
-		SchedulerTick:    100 * time.Millisecond,
-		BatchFlush:       50 * time.Millisecond,
-		BatchSize:        10,
-		JitterFraction:   0,
-		FailThreshold:    3,
-		SuccessThreshold: 2,
-		SSEHeartbeat:     time.Second,
-		HTTPAddr:         ":0",
+		WorkerPoolSize:      8,
+		PoolQueueSize:       100,
+		SchedulerTick:       100 * time.Millisecond,
+		BatchFlush:          50 * time.Millisecond,
+		BatchSize:           10,
+		JitterFraction:      0,
+		FailThreshold:       3,
+		SuccessThreshold:    2,
+		AllowPrivateTargets: true,
+		SSEHeartbeat:        time.Second,
+		HTTPAddr:            ":0",
 	}
 }
 

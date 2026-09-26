@@ -79,6 +79,8 @@ func Run(ctx context.Context, dsn string) error {
 }
 
 // DropAll remove o schema inteiro (make migrate-down). Destrutivo por design.
+// Após recriar o schema, o usuário conectado (owner) mantém privilégios —
+// sem GRANT excessivo a PUBLIC (boas práticas: menor privilégio).
 func DropAll(ctx context.Context, dsn string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -88,6 +90,5 @@ func DropAll(ctx context.Context, dsn string) error {
 	if _, err := pool.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
 		return fmt.Errorf("migrate: drop: %w", err)
 	}
-	pool.Exec(ctx, `GRANT ALL ON SCHEMA public TO public`)
 	return nil
 }

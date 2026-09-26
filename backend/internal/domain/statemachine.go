@@ -6,13 +6,13 @@ import "time"
 // mantido em memória e materializado no banco a cada transição
 // (arquitetura §3.3).
 type EndpointRuntime struct {
-	Status           StatusClass
-	ConsecFails      int
-	ConsecSuccesses  int
-	FailWindowStart  time.Time // horário da 1ª falha da janela consecutiva
-	IncidentID       int64     // 0 = sem incidente aberto
-	IncidentStarted  time.Time
-	InFlight         bool // guarda anti-sobreposição (RF-011)
+	Status          StatusClass
+	ConsecFails     int
+	ConsecSuccesses int
+	FailWindowStart time.Time // horário da 1ª falha da janela consecutiva
+	IncidentID      int64     // 0 = sem incidente aberto
+	IncidentStarted time.Time
+	InFlight        bool // guarda anti-sobreposição (RF-011)
 }
 
 // Transition descreve o resultado de Apply para o engine agir.

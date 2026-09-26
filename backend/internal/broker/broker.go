@@ -44,7 +44,7 @@ type counter struct {
 	n  int
 }
 
-func (c *counter) Inc() { c.mu.Lock(); c.n++; c.mu.Unlock() }
+func (c *counter) Inc()          { c.mu.Lock(); c.n++; c.mu.Unlock() }
 func (c *counter) Snapshot() int { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
 
 // Broker publica eventos por tópico para múltiplos assinantes.
