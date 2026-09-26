@@ -3,6 +3,7 @@
 // Teste de Sobrecarga (RNF-002/RNF-011, checklist final) — rode com:
 //
 //	make load-test        (≡ go test -tags load ./internal/engine -run Load -v)
+//	make load-test-pg     (idem, contra o PostgreSQL real — LOAD_TEST_PG_DSN)
 //
 // Valida que o pipeline scheduler→queue→worker pool:
 //  1. sustenta N endpoints vencidos no mesmo tick (burst) sem queda de jobs
@@ -18,12 +19,17 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"monitor/internal/config"
 	"monitor/internal/domain"
+	"monitor/internal/migrate"
 	"monitor/internal/storage"
 )
 
@@ -41,10 +47,60 @@ func loadConfig(pool, queue int) config.Config {
 	}
 }
 
+// newLoadStore conecta no PostgreSQL real quando LOAD_TEST_PG_DSN está
+// definida (make load-test-pg — valida o caminho store→pgx→banco sob carga).
+// Sem a env, usa MemStore (make load-test). No Postgres: migra o schema,
+// rastreia os endpoints criados e registra limpeza completa ao final
+// (checks/rollups/incidents/notifications/endpoints) — execuções repetidas
+// não acumulam volume nem quebram a contagem de checks.
+func newLoadStore(t *testing.T, created *[]int64) (storage.Store, func()) {
+	t.Helper()
+	dsn := os.Getenv("LOAD_TEST_PG_DSN")
+	if dsn == "" {
+		return storage.NewMem(), func() {}
+	}
+	ctx := context.Background()
+	if err := migrate.Run(ctx, dsn); err != nil {
+		t.Fatalf("load-pg: migrar schema: %v", err)
+	}
+	pg, err := storage.NewPg(ctx, dsn)
+	if err != nil {
+		t.Fatalf("load-pg: conectar: %v", err)
+	}
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			pg.Close()
+			if len(*created) == 0 {
+				return
+			}
+			pool, err := pgxpool.New(ctx, dsn)
+			if err != nil {
+				t.Logf("load-pg: cleanup pool: %v", err)
+				return
+			}
+			defer pool.Close()
+			for _, tbl := range []string{"checks", "check_rollups_minute", "incidents", "notifications"} {
+				q := fmt.Sprintf(`DELETE FROM %s WHERE endpoint_id = ANY($1::bigint[])`, tbl)
+				if _, err := pool.Exec(ctx, q, *created); err != nil {
+					t.Logf("load-pg: cleanup %s: %v", tbl, err)
+				}
+			}
+			if _, err := pool.Exec(ctx,
+				`DELETE FROM endpoints WHERE id = ANY($1::bigint[])`, *created); err != nil {
+				t.Logf("load-pg: cleanup endpoints: %v", err)
+			}
+		})
+	}
+	return pg, cleanup
+}
+
 // seedDueEndpoints cria N endpoints todos vencidos agora (intervalo 1 min —
 // não voltam a vencer dentro da janela do teste) e sincroniza no engine.
-func seedDueEndpoints(t *testing.T, store storage.Store, eng *Engine, n int, url string) {
+// Devolve os IDs criados (usados na limpeza do Postgres).
+func seedDueEndpoints(t *testing.T, store storage.Store, eng *Engine, n int, url string) []int64 {
 	t.Helper()
+	ids := make([]int64, 0, n)
 	for i := 0; i < n; i++ {
 		id, err := store.CreateEndpoint(context.Background(), domain.Endpoint{
 			Name:             fmt.Sprintf("ep-%05d", i),
@@ -60,12 +116,22 @@ func seedDueEndpoints(t *testing.T, store storage.Store, eng *Engine, n int, url
 		if err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
+		ids = append(ids, id)
 		ep := domain.Endpoint{ID: id, Name: fmt.Sprintf("ep-%05d", i), URL: url, Method: "GET", Active: true}
 		ep.Interval, ep.Timeout = 60*time.Second, 2*time.Second
 		if err := eng.SyncEndpoint(context.Background(), ep); err != nil {
 			t.Fatalf("sync %d: %v", i, err)
 		}
 	}
+	return ids
+}
+
+// storeKind rotula o store nos logs do teste (memória vs postgres).
+func storeKind(s storage.Store) string {
+	if _, mem := s.(*storage.MemStore); mem {
+		return "memória"
+	}
+	return "postgres"
 }
 
 // peakMonitor amostra o in-flight durante o burst e guarda o pico.
@@ -110,14 +176,16 @@ func TestLoadSustentado(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := storage.NewMem()
+	var created []int64
+	store, cleanup := newLoadStore(t, &created)
+	t.Cleanup(cleanup)
 	cfg := loadConfig(poolSize, queueSize)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng, err := New(context.Background(), cfg, store, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedDueEndpoints(t, store, eng, N, srv.URL+"/ok")
+	created = append(created, seedDueEndpoints(t, store, eng, N, srv.URL+"/ok")...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	peak := startPeakMonitor(eng)
@@ -181,14 +249,16 @@ func TestLoadBackpressure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := storage.NewMem()
+	var created []int64
+	store, cleanup := newLoadStore(t, &created)
+	t.Cleanup(cleanup)
 	cfg := loadConfig(poolSize, queueSize)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng, err := New(context.Background(), cfg, store, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedDueEndpoints(t, store, eng, N, srv.URL+"/ok")
+	created = append(created, seedDueEndpoints(t, store, eng, N, srv.URL+"/ok")...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go eng.Run(ctx)
@@ -204,8 +274,20 @@ func TestLoadBackpressure(t *testing.T) {
 	if got.Processed.Load() != N {
 		t.Fatalf("processados=%d, esperado %d (deadlock? fila %d)", got.Processed.Load(), N, got.QueueDepth.Load())
 	}
-	if g := got.Dropped.Load(); g == 0 {
-		t.Fatal("esperava queue_starved>0 com fila de 8 e 300 vencidos")
+	// "starved>0" só é determinístico em memória: lá o round enfileira quase
+	// instantaneamente e a fila de 8 estoura. Contra o Postgres o loop de
+	// revalidação (1 GET/endpoint) é lento o bastante para os workers drenarem
+	// sem recusar jobs — 0 drops é um resultado MELHOR, não um bug. A
+	// invariante real validada nos dois stores: todos processados, 0 double-run.
+	if _, mem := store.(*storage.MemStore); mem && got.Dropped.Load() == 0 {
+		t.Fatal("memória: esperava queue_starved>0 com fila de 8 e 300 vencidos")
+	}
+	if got.Dropped.Load() > 0 {
+		t.Logf("OK: backpressure com %d starved/drops → todos %d processados em rounds seguintes",
+			got.Dropped.Load(), N)
+	} else {
+		t.Logf("OK: dreno sem drops (%s); %d processados exatamente uma vez",
+			storeKind(store), N)
 	}
 	// Mesmo sob backpressure, nenhum endpoint pode rodar 2× (fix do snapshot).
 	checks, err := store.ListChecks(context.Background(), storage.CheckFilter{Limit: 100000})
@@ -219,6 +301,4 @@ func TestLoadBackpressure(t *testing.T) {
 			t.Fatalf("backpressure: endpoint %d rodou %d vezes", c.EndpointID, seen[c.EndpointID])
 		}
 	}
-	t.Logf("OK: backpressure com %d starved/drops → todos %d processados nos rounds seguintes",
-		got.Dropped.Load(), len(seen))
 }

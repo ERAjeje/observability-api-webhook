@@ -12,14 +12,28 @@ bash deploy/provision.sh
 ```
 
 O script instala Docker, clona o repo em `/opt/monitor`, gera `.env` com
-`DB_PASSWORD` e `JWT_SECRET` aleatórios (openssl), builda o frontend, sobe a
-stack e emite certificado TLS real via **acme.sh** (modo standalone, porta 80
-livre por alguns segundos) — instalando como `fullchain.pem`/`privkey.pem` no
-layout que o nginx já espera.
+`DB_PASSWORD`, `JWT_SECRET` e `HEADERS_ENC_KEY` (S-05) aleatórios (openssl),
+builda o frontend, sobe a stack e emite certificado TLS real via **acme.sh**
+(modo standalone, porta 80 livre por alguns segundos) — instalando como
+`fullchain.pem`/`privkey.pem` no layout que o nginx já espera.
 
 > **Modo local** (sem `REPO_URL`): copia o diretório atual — útil para quem
 > roda direto na VPS. Se não houver Node no host, usará o `frontend/dist`
 > commitado (requer `make frontend-build` antes de commitar mudanças de UI).
+
+### Smoke local (sem VPS/TLS real)
+
+Valida o pipeline completo de provisionamento (`.env` → build → stack →
+health gate) com certificado **self-signed** em vez de LetsEncrypt:
+
+```bash
+SKIP_TLS=1 STACK_DIR=/tmp/monitor-smoke bash deploy/provision.sh
+# → stack monitor-smoke no ar em https://localhost (readyz/status/metrics)
+docker compose -f /tmp/monitor-smoke/docker-compose.yml down -v   # limpeza
+```
+
+O **acme.sh** é a única etapa que exige infraestrutura real (DNS/porta 80).
+Com `SKIP_TLS=1` o script pula a exigência de `DOMAIN`/`EMAIL`.
 
 ## 2. Pós-deploy — checagens obrigatórias
 

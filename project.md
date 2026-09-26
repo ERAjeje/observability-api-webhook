@@ -28,17 +28,20 @@ usuário, armazena **logs de latência/status** e fornece uma **página pública
 - Armazenamento de logs de latência/status por checagem.
 - Página pública de status em tempo real (SSE/WebSockets) com gráficos (uptime, latência, histórico).
 
-## 📌 Próximo passo — Hardening pendente + validar CI/Deploy reais
+## 📌 Próximo passo — validar CI/Deploy reais (infra)
 
-✅ **Fases 1–4 + Checklist de Integração** (CI workflow + `make ci`, deploy script/doc,
-Sobrecarga com fix de double-run, Observabilidade `/metrics`). Restam:
+✅ **Fases 1–4 + Checklist + Hardening S-05/S-08** · ✅ Sobrecarga **memória e
+PostgreSQL real** (`make load-test-pg`) · ✅ Deploy validado por **smoke local**
+(`SKIP_TLS=1` — provision.sh end-to-end, sem infra). Restam — todos dependem
+de infraestrutura externa:
 
 - **[ ]** **Push para o remoto** → rodar o CI de verdade (GitHub Actions) e o **E2E em runner limpo**
-- **[ ]** **VPS**: executar `deploy/provision.sh` (TLS real), validar operação + backups (RNF-003)
-- **[ ]** **Sobrecarga em ambiente real**: N endpoints × 1 min contra o PostgreSQL (o load-test roda em memória)
+- **[ ]** **VPS**: executar `deploy/provision.sh` (TLS real via acme.sh, `DOMAIN`/`EMAIL`),
+  validar operação + backups (RNF-003)
 - **[ ]** Segurança do `docs/security-review.md`: restam apenas pendências **de infra/produto** —
-  **S-06/S-07/S-09/S-10** (hardening de produção no deploy: secrets fortes, digests de imagem, TLS real,
-  healthcheck real) — **S-05 e S-08 resolvidos** em código, **S-11 coberto** na infra do `deploy/README.md`.
+  **S-06/S-07/S-09/S-10** (hardening de produção no deploy: digests de imagem, secrets fortes,
+  TLS real, healthcheck real) — **S-05 e S-08 resolvidos** em código, **S-11 coberto** na infra
+  do `deploy/README.md`, **TLS self-signed** já coberto pelo smoke.
 
 > ⚠️ Ao publicar no remoto, remover certificados locais de `deploy/nginx/certs` (gitignored) e
 > garantir que `frontend/dist` esteja atualizado (`make frontend-build`).

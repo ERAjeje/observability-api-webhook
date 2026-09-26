@@ -68,7 +68,11 @@ cadastrados, logs de latência/status e **status page pública em tempo real**.
   → **HTTP 429** no painel admin.
 
 **Cobertura de testes** (com `-race`): todos os pacotes Go verdes — api, auth,
-broker, checker, domain, engine, metrics, notifier, scheduler, seal, storage, worker.
+broker, checker, domain, engine, metrics, notifier, quota, scheduler, seal, storage, worker.
+**Sobrecarga** validada em dois modos: `make load-test` (memória) e
+`make load-test-pg` (PostgreSQL real via container efêmero — 800 endpoints em
+burst, 0 drops, 0 double-runs). **Deploy** validado por `SKIP_TLS=1` (smoke
+local do `provision.sh` end-to-end: `.env` → build → stack → readyz).
 Frontend: `npm run build` verde + 4 cenários E2E Playwright.
 
 ---

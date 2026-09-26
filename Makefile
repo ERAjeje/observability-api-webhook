@@ -41,6 +41,21 @@ frontend-build: ## Build do frontend (estáticos → frontend/dist)
 load-test: ## Sobrecarga: N endpoints em burst sem double-run/dedlock (RNF-002/011)
 	cd backend && go test -tags load ./internal/engine -run Load -v -count=1
 
+load-test-pg: ## Sobrecarga contra o PostgreSQL REAL (container efêmero) — valida store pgx sob carga
+	@set -e; \
+	docker rm -f monitor-load-pg >/dev/null 2>&1 || true; \
+	docker run -d --rm --name monitor-load-pg \
+	  -e POSTGRES_PASSWORD=loadpg -e POSTGRES_USER=monitor -e POSTGRES_DB=monitor \
+	  -p 127.0.0.1:55432:5432 postgres:15-alpine >/dev/null; \
+	trap 'docker rm -f monitor-load-pg >/dev/null 2>&1 || true' EXIT; \
+	printf "== aguardando postgres ==\n"; \
+	for i in $$(seq 1 40); do \
+	  docker exec monitor-load-pg pg_isready -U monitor -d monitor >/dev/null 2>&1 && break; \
+	  sleep 1; \
+	done; \
+	cd backend && LOAD_TEST_PG_DSN='postgres://monitor:loadpg@127.0.0.1:55432/monitor?sslmode=disable' \
+	  go test -tags load ./internal/engine -run Load -v -count=1
+
 ci: ## Pipeline local de CI (vet + testes -race + build/audit frontend)
 	@set -e; \
 	printf "== go vet ==\n"; (cd backend && go vet ./...); \

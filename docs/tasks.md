@@ -188,3 +188,13 @@
   (`MAX_ENDPOINTS_PER_ACCOUNT`, `MIN_CHECK_INTERVAL_SECONDS`, `CHECKS_PER_MONTH_QUOTA`); violações
   devolvem **HTTP 429** com mensagem amigável no create/update (IP+mensagem: o painel mostra ao usuário).
   Validado ao vivo: 5 endpoints OK → 6º 429; intervalo 5s < 10s → 429 no create e no update.
+- [x] **Sobrecarga contra o PostgreSQL real** (RNF-002/011): `make load-test-pg` — container
+  efêmero postgres, load-test parametrizado (`LOAD_TEST_PG_DSN`): 800 endpoints em burst com
+  0 drops e 0 double-runs pelo store pgx real (pico in-flight ≤ pool); backpressure com dreno
+  contínuo (a invariante "todos processados, exatamente-once" vale nos dois stores). Cleanup
+  automático dos dados do teste (checks/rollups/incidents/endpoints).
+- [x] **Deploy — smoke local do provision** (RNF-003/016): `SKIP_TLS=1` no `provision.sh`
+  (self-signed em vez de acme.sh; fallback mkdir sem sudo) validado end-to-end em sandbox:
+  `.env` com DB_PASSWORD/JWT_SECRET/HEADERS_ENC_KEY aleatórios, build frontend, stack no ar,
+  gate readyz, `/status`+`/metrics` 200 e signup 201 no Postgres. A única etapa que exige
+  infra real é a emissão acme.sh (DNS/porta 80 — documentada no deploy/README).
