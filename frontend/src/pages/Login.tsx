@@ -41,9 +41,10 @@ export default function Login() {
         <h1 className="mb-1 text-center text-xl font-bold text-slate-100">Central de Monitoramento</h1>
         <p className="mb-6 text-center text-sm text-slate-500">Acesso administrativo</p>
         <form onSubmit={submit} className="space-y-4 rounded-xl border border-white/10 bg-slate-900 p-6">
-          <label className="block">
+          <label className="block" htmlFor="login-email">
             <span className="text-xs font-medium text-slate-400">E-mail</span>
             <input
+              id="login-email"
               type="email"
               required
               autoComplete="email"
@@ -52,9 +53,10 @@ export default function Login() {
               className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-400"
             />
           </label>
-          <label className="block">
+          <label className="block" htmlFor="login-password">
             <span className="text-xs font-medium text-slate-400">Senha</span>
             <input
+              id="login-password"
               type="password"
               required
               minLength={8}

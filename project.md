@@ -28,22 +28,17 @@ usuário, armazena **logs de latência/status** e fornece uma **página pública
 - Armazenamento de logs de latência/status por checagem.
 - Página pública de status em tempo real (SSE/WebSockets) com gráficos (uptime, latência, histórico).
 
-## 📌 Próximo passo — Fase 4 (Frontend: Dashboard + Status Page)
+## 📌 Próximo passo — Integração final (CI · Deploy · Hardening)
 
-✅ **Fases 1, 2 e 3 concluídas** (setup + core engine + API REST/SSE/notifier). Próxima etapa:
+✅ **Fases 1, 2, 3 e 4 concluídas** (setup + core engine + API REST/SSE/notifier + frontend). Restam os itens do checklist final:
 
-- **[ ]** **T4.1/T4.2** Scaffold React+Vite+Tailwind+React Query + cliente API/SSE
-- **[ ]** **T4.3** Login e CRUD de endpoints/grupos no dashboard admin
-- **[ ]** **T4.4** Logs/stats (tabela paginada + gráficos de latência/uptime)
-- **[ ]** **T4.5** Configuração de alertas (canais, supressão, limites)
-- **[ ]** **T4.6/T4.7** Status page pública (cards + Recharts) + SSE em tempo real
-- **[ ]** **T4.8/T4.9** E2E Playwright do fluxo completo (UC-01/UC-05)
-
-> ⚠️ Antes da Fase 4: revisar `docs/security-review.md` (achados S-05/S-08/S-11
-> recomendados para acompanhar a API).
+- **[ ]** **CI** verde em `develop`: lint + testes (`-race`) + build backend/frontend + E2E Playwright (RNF-021)
+- **[ ]** **Deploy** na VPS: `docker compose up -d` com TLS real (certbot/acme) (RNF-003, RNF-016)
+- **[ ]** **Sobrecarga** validada: N endpoints × intervalo 1 min sem stackar worker (RNF-002, RNF-011)
+- **[ ]** **Observabilidade**: logs estruturados + métricas do worker (RF-012)
+- **[ ]** Segurança pendente do `docs/security-review.md`: **S-05** (cifrar headers dos endpoints), **S-08** (cotas por conta), **S-11** (firewall de egress)
 
 ## 📌 Decisões abertas (a definir durante o desenvolvimento)
 
-- Frontend: Vite + React Router vs Next.js (SPA estático no Nginx é o padrão assumido).
-- Painel de alertas: permitir criar alertas por endpoint individual ou só global (T4.5).
-- Detalhamento da stack DevOps (CI/CD, observabilidade).
+- CI/CD: GitHub Actions vs GitLab CI (o repo é local; decidir no deploy).
+- Multi-tenant vs single-tenant (rotas admin globais hoje — ver S-23 no security-review).

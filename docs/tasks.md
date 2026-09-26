@@ -131,32 +131,32 @@
 
 ### 4.1 Base frontend
 
-- [ ] **T4.1** Scaffold `frontend/` com **React + Vite + TypeScript + Tailwind CSS + React Router** + React Query; layout base responsivo e tema customizável (título, descrição, cores) (RF-023).
+- [x] **T4.1** Scaffold `frontend/` com **React + Vite + TypeScript + Tailwind CSS + React Router** + React Query; layout base responsivo e tema customizável (título, descrição, cores) (RF-023).
   - **Critério de aceitação:** `npm run build` passa; tema carregado de config; layout mobile-first (RNF-015).
-- [ ] **T4.2** Implementar cliente de API (`lib/api.ts`) e **cliente SSE** com `EventSource` + consumo do snapshot no connect e reconexão automática (RNF-010).
+- [x] **T4.2** Implementar cliente de API (`lib/api.ts`) e **cliente SSE** com `EventSource` + consumo do snapshot no connect e reconexão automática (RNF-010).
   - **Critério de aceitação:** reconexão após queda não diverge do estado real (snapshot aplicado); interface única de eventos no frontend.
 
 ### 4.2 Dashboard administrativo
 
-- [ ] **T4.3** Implementar tela de **login** e **CRUD de endpoints/grupos** (formulário com URL, método, headers, intervalo, timeout, expect status/body), consumindo a API admin (RF-001..006).
+- [x] **T4.3** Implementar tela de **login** e **CRUD de endpoints/grupos** (formulário com URL, método, headers, intervalo, timeout, expect status/body), consumindo a API admin (RF-001..006).
   - **Critério de aceitação:** sem sessão → redirect para login; CRUD funcional contra a API real; toggle ativar/desativar reflete no agendamento.
-- [ ] **T4.4** Implementar tela de **logs/stats**: tabela de checagens paginada com filtros (endpoint, período, status) e gráficos de latência (RF-018).
+- [x] **T4.4** Implementar tela de **logs/stats**: tabela de checagens paginada com filtros (endpoint, período, status) e gráficos de latência (RF-018).
   - **Critério de aceitação:** filtros refletem na request; paginação funcional; gráficos renderizam a partir dos rollups da API.
-- [ ] **T4.5** Implementar tela de **alertas**: canais (e-mail/webhook), janela de supressão e limites de latência (RF-025..027, RF-004).
+- [x] **T4.5** Implementar tela de **alertas**: canais (e-mail/webhook), janela de supressão e limites de latência (RF-025..027, RF-004).
   - **Critério de aceitação:** configuração salva é usada pelo notifier (teste de integração); validação de URL de webhook.
 
 ### 4.3 Status page pública
 
-- [ ] **T4.6** Implementar **status page pública**: cards por grupo/endpoint com status atual (`UP`/`DOWN`/`DEGRADED`), indicadores acessíveis e legíveis em poucos segundos (RF-019, RF-024).
+- [x] **T4.6** Implementar **status page pública**: cards por grupo/endpoint com status atual (`UP`/`DOWN`/`DEGRADED`), indicadores acessíveis e legíveis em poucos segundos (RF-019, RF-024).
   - **Critério de aceitação:** sem login; status perceptível em < 5 s; contraste WCAG AA (RNF-005 visual).
-- [ ] **T4.7** Implementar **gráficos com Recharts**: série de latência P50/P95/P99 e uptime % (dia/semana/mês) a partir dos rollups, com `LIMIT` de pontos (RF-020, RNF-014).
+- [x] **T4.7** Implementar **gráficos com Recharts**: série de latência P50/P95/P99 e uptime % (dia/semana/mês) a partir dos rollups, com `LIMIT` de pontos (RF-020, RNF-014).
   - **Critério de aceitação:** renderiza até 1.440 pontos sem queda de FPS; Lighthouse **Performance ≥ 90** na status page (RNF-015).
-- [ ] **T4.8** Integrar **tempo real via SSE**: transições de status, abertura/fechamento de incidente e atualização de gráficos sem recarga (RF-021, RF-022).
+- [x] **T4.8** Integrar **tempo real via SSE**: transições de status, abertura/fechamento de incidente e atualização de gráficos sem recarga (RF-021, RF-022).
   - **Critério de aceitação:** transição UP→DOWN aparece na página em ≤ **5 s** sem refresh (RNF-009, UC-05); timeline de incidentes atualiza ao vivo.
 
 ### 4.4 Qualidade e E2E
 
-- [ ] **T4.9** Implementar teste **E2E** (Playwright) do fluxo completo: checagem falha → incidente → alerta físico (webhook de teste) → status page reflete DOWN em todos os clientes.
+- [x] **T4.9** Implementar teste **E2E** (Playwright) do fluxo completo: checagem falha → incidente → alerta físico (webhook de teste) → status page reflete DOWN em todos os clientes.
   - **Critério de aceitação:** cenários dos UC-01 e UC-05 verdes ponta a ponta contra a stack Docker completa.
 
 > **✅ Barreira da Fase 4:** status page pública funcional em produção local (Docker) — gráficos reais, tempo real SSE, dashboard admin operando CRUD e alertas; Lighthouse ≥ 90; E2E verde.

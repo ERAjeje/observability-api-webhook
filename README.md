@@ -23,7 +23,7 @@ cadastrados, logs de latência/status e **status page pública em tempo real**.
 
 ---
 
-## ✅ Estado atual (Fases 1, 2 e 3 concluídas)
+## ✅ Estado atual (Fases 1, 2, 3 e 4 concluídas)
 
 - **Fase 1 — Setup**: módulo Go, config por env, `pgxpool` + `/healthz` `/readyz`,
   migração inicial com particionamento, Dockerfile multi-stage (**~14 MB**),
@@ -50,9 +50,20 @@ cadastrados, logs de latência/status e **status page pública em tempo real**.
   - `notifier` — alertas por **e-mail (SMTP)** e **webhook** (Slack/Discord),
     janela de supressão, retry com backoff e auditoria em `notifications`
     (T3.7).
+- **Fase 4 — Frontend (status page + painel admin)**:
+  - Vite + React + TS + Tailwind + React Query + Recharts, com **code-split**
+    (Recharts fora do bundle público — Lighthouse/RNF-015).
+  - Status page pública: cards por grupo, gráficos 24h/7d/30d a partir de
+    **rollups**, timeline de incidentes, branding dinâmico via `/api/v1/config`
+    e **tempo real via SSE** (UP→DOWN em ≤ 5s sem refresh — RNF-009).
+  - Painel admin: login JWT, CRUD de endpoints/grupos (com teste de
+    conectividade), logs filtráveis/paginados, estatísticas, config de alertas
+    e branding (settings dinâmicos, T4.5) e auditoria de notificações.
+  - **E2E Playwright** — 4 cenários verdes contra a stack Docker (UC-01/UC-05).
 
-**Cobertura de testes** (com `-race`): todos os pacotes verdes — api, auth,
-broker, checker, domain, engine, notifier, scheduler, storage, worker.
+**Cobertura de testes** (com `-race`): todos os pacotes Go verdes — api, auth,
+broker, checker, domain, engine, notifier, scheduler, settings, storage, worker.
+Frontend: `npm run build` verde + 4 cenários E2E Playwright.
 
 ---
 
@@ -66,9 +77,12 @@ broker, checker, domain, engine, notifier, scheduler, storage, worker.
 | `/api/v1/admin/groups` | **JWT** | CRUD de grupos |
 | `/api/v1/admin/checks` | **JWT** | logs brutos paginados/filtráveis |
 | `/api/v1/admin/stats/*` | **JWT** | séries (rollups) + resumo uptime |
+| `/api/v1/admin/settings` | **JWT** | branding (RF-023) + canais de alerta (T4.5) |
 | `/api/v1/admin/notifications` | **JWT** | auditoria de alertas |
 | `GET /api/v1/status` | — | status atual (sem segredos) |
 | `GET /api/v1/incidents` | — | timeline de incidentes |
+| `GET /api/v1/config` | — | branding público da status page |
+| `GET /api/v1/status/{id}/stats/*` | — | séries/resumo por endpoint (rollups) |
 | `GET /api/v1/events` | — | SSE: snapshot + eventos + heartbeat |
 
 ```bash
@@ -86,11 +100,21 @@ curl -sk -H "Authorization: Bearer $TOKEN" https://localhost/api/v1/admin/endpoi
 
 ```bash
 cp .env.example .env          # ajuste JWT_SECRET
-docker compose up --build -d  # postgres + backend + nginx
+make frontend-build           # compila a SPA (estáticos em frontend/dist)
+docker compose up --build -d  # postgres + backend + nginx (serve SPA + API)
+# Status page:  https://localhost/
+# Painel admin: /admin/login   · API: /api/v1/*
 curl -k https://localhost/healthz   # {"status":"ok"}
 ```
 
 > Certificados TLS: gere self-signed em `deploy/nginx/certs/` ou use acme.sh.
+
+### E2E (Playwright) — requer a stack rodando
+
+```bash
+cd frontend && npx playwright install chromium
+npx playwright test           # 4 cenários: UC-01/UC-05, status page, login/CRUD, settings
+```
 
 ### Desenvolvimento (backend com store em memória, sem Docker)
 
@@ -133,7 +157,7 @@ project-3/
 │   └── Dockerfile            # multi-stage → distroless nonroot
 ├── deploy/nginx/nginx.conf   # reverse proxy + SSE sem buffer
 ├── docker-compose.yml
-├── frontend/                 # placeholder (Fase 4)
+├── frontend/                 # React + Vite + TS + Tailwind + Recharts (Fase 4)
 └── docs/                     # requirements · architecture · tasks
 ```
 
@@ -146,4 +170,4 @@ project-3/
 | 1 — Setup & Boilerplate | ✅ Concluída |
 | 2 — Core Engine (scheduler + worker pool) | ✅ Concluída |
 | 3 — API REST + SSE + Alertas | ✅ Concluída |
-| 4 — UI/UX Frontend (dashboard + status page) | ⏳ Próxima |
+| 4 — UI/UX Frontend (dashboard + status page) | ✅ Concluída |
