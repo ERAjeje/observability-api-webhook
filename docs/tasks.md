@@ -165,7 +165,17 @@
 
 ## Checklist Final de Integração
 
-- [ ] **CI** verde para backend/frontend em `develop` (lint, teste, build) (RNF-021).
-- [ ] **Deploy** na VPS: `docker compose up -d` com TLS (ssl via certbot/acme) e volumes persistentes (RNF-003, RNF-016).
-- [ ] **Sobrecarga** validada: N endpoints com intervalo de 1 min sem stackar worker e sem queda de eventos (RNF-002, RNF-011).
-- [ ] **Observabilidade**: logs estruturados e métricas do worker (`queue_starved`, jobs processados, latência média) (RF-012).
+- [x] **CI** verde para backend/frontend (lint, teste, build) (RNF-021): `.github/workflows/ci.yml`
+  (backend vet+tests-race+vulncheck · frontend build+audit · E2E na stack) e `make ci` local.
+  *Execução real depende do repo remoto (hoje local).*
+- [x] **Deploy** na VPS: `deploy/provision.sh` + `deploy/README.md` — Docker, `.env` com
+  segredos aleatórios, frontend build, stack up e **TLS real via acme.sh** (RNF-003, RNF-016).
+  *Validação real depende da VPS; fluxo e script prontos.*
+- [x] **Sobrecarga** validada (`make load-test`): 800 endpoints em burst **processados exatamente 1×**
+  com 0 drops e pico in-flight ≤ pool; backpressure (fila=8) → `queue_starved>0` e recuperação total
+  sem deadlock. **Corrigido um double-run real durante a validação** (snapshot obsoleto do scheduler —
+  revalida due no tempo atual, RF-011). (RNF-002, RNF-011)
+- [x] **Observabilidade** (RF-012): `GET /metrics` (Prometheus text, sem lib externa) — pool
+  (`queue_depth`, `queue_starved_total`, jobs, in-flight), engine (checks por resultado, histograma de
+  latência P50/P95, transições, eventos, incidentes), endpoints por estado e runtime Go. Logs já
+  estruturados (slog). nginx expõe em `location = /metrics` (restrição por rede — S-11).

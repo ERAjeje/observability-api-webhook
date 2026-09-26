@@ -38,5 +38,15 @@ docker-logs: ## Logs dos serviços
 frontend-build: ## Build do frontend (estáticos → frontend/dist)
 	cd frontend && npm ci && npm run build
 
+load-test: ## Sobrecarga: N endpoints em burst sem double-run/dedlock (RNF-002/011)
+	cd backend && go test -tags load ./internal/engine -run Load -v -count=1
+
+ci: ## Pipeline local de CI (vet + testes -race + build/audit frontend)
+	@set -e; \
+	printf "== go vet ==\n"; (cd backend && go vet ./...); \
+	printf "== go test -race ==\n"; (cd backend && go test -race ./...); \
+	printf "== frontend build ==\n"; (cd frontend && npm ci && npm run build); \
+	printf "== npm audit (high) ==\n"; (cd frontend && npm audit --audit-level=high)
+
 clean: ## Remove binários
 	rm -rf backend/bin

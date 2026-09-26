@@ -28,17 +28,21 @@ usuário, armazena **logs de latência/status** e fornece uma **página pública
 - Armazenamento de logs de latência/status por checagem.
 - Página pública de status em tempo real (SSE/WebSockets) com gráficos (uptime, latência, histórico).
 
-## 📌 Próximo passo — Integração final (CI · Deploy · Hardening)
+## 📌 Próximo passo — Hardening pendente + validar CI/Deploy reais
 
-✅ **Fases 1, 2, 3 e 4 concluídas** (setup + core engine + API REST/SSE/notifier + frontend). Restam os itens do checklist final:
+✅ **Fases 1–4 + Checklist de Integração** (CI workflow + `make ci`, deploy script/doc,
+Sobrecarga com fix de double-run, Observabilidade `/metrics`). Restam:
 
-- **[ ]** **CI** verde em `develop`: lint + testes (`-race`) + build backend/frontend + E2E Playwright (RNF-021)
-- **[ ]** **Deploy** na VPS: `docker compose up -d` com TLS real (certbot/acme) (RNF-003, RNF-016)
-- **[ ]** **Sobrecarga** validada: N endpoints × intervalo 1 min sem stackar worker (RNF-002, RNF-011)
-- **[ ]** **Observabilidade**: logs estruturados + métricas do worker (RF-012)
-- **[ ]** Segurança pendente do `docs/security-review.md`: **S-05** (cifrar headers dos endpoints), **S-08** (cotas por conta), **S-11** (firewall de egress)
+- **[ ]** **Push para o remoto** → rodar o CI de verdade (GitHub Actions) e o **E2E em runner limpo**
+- **[ ]** **VPS**: executar `deploy/provision.sh` (TLS real), validar operação + backups (RNF-003)
+- **[ ]** **Sobrecarga em ambiente real**: N endpoints × 1 min contra o PostgreSQL (o load-test roda em memória)
+- **[ ]** Segurança do `docs/security-review.md`: **S-05** (cifrar headers dos endpoints em repouso),
+  **S-08** (cotas por conta), **S-11** (firewall de egress — aplicável na infra do deploy)
+
+> ⚠️ Ao publicar no remoto, remover certificados locais de `deploy/nginx/certs` (gitignored) e
+> garantir que `frontend/dist` esteja atualizado (`make frontend-build`).
 
 ## 📌 Decisões abertas (a definir durante o desenvolvimento)
 
-- CI/CD: GitHub Actions vs GitLab CI (o repo é local; decidir no deploy).
+- CI/CD: GitHub Actions (workflow já incluído) vs GitLab CI (repo é local — decidir no push).
 - Multi-tenant vs single-tenant (rotas admin globais hoje — ver S-23 no security-review).

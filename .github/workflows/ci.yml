@@ -1,0 +1,115 @@
+# CI — Central de Monitoramento (checklist final: RNF-021)
+# Roda em push para develop/main e em PRs. Trilha local idêntica: `make ci`.
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  backend:
+    name: Backend (vet + tests -race + vulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Formatação (gofmt)
+        run: |
+          test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+        working-directory: backend
+
+      - name: Build
+        run: go build ./...
+
+      - name: Testes (-race)
+        run: go test -race ./... -count=1
+        working-directory: backend
+
+      - name: Sobrecarga (RNF-002/011)
+        run: go test -tags load ./internal/engine -run Load -count=1
+        working-directory: backend
+
+      - name: govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: backend/go.mod
+          working-directory: backend
+
+  frontend:
+    name: Frontend (build + audit + tipos)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (tsc + vite)
+        run: npm run build
+
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  e2e:
+    name: E2E Playwright (stack Docker completa)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Frontend build (dist atualizado)
+        run: |
+          cd frontend && npm ci && npm run build
+
+      - name: Sobe a stack (postgres + backend + nginx)
+        run: |
+          cp .env.example .env
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=ci-secret-$(openssl rand -hex 16)|" .env
+          docker compose up -d --build
+
+      - name: Aguarda healthz/readyz
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sfk https://localhost/readyz >/dev/null 2>&1; then exit 0; fi
+            sleep 3
+          done
+          docker compose ps
+          docker compose logs --tail=100
+          exit 1
+
+      - name: Playwright (chromium)
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Artefatos de falha
+        if: failure()
+        run: |
+          docker compose logs --tail=200 > /tmp/stack.log || true
+          echo "::error file=/tmp/stack.log::logs da stack"
+        continue-on-error: true
+
+      - name: Derruba stack
+        if: always()
+        run: docker compose down -v
