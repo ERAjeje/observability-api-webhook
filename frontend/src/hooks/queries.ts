@@ -25,10 +25,18 @@ export function useSummary(endpointId: number | null) {
   });
 }
 
-export function useSeries(endpointId: number | null, from: string, to: string, bucket: "minute" | "hour" | "day" = "minute") {
+// isoHoursAgo devolve o ISO de "h" horas atrás — janela das séries (RF-020).
+export function isoHoursAgo(h: number): string {
+  return new Date(Date.now() - h * 3600_000).toISOString();
+}
+
+export function useSeries(endpointId: number | null, bucket: "minute" | "hour" | "day" = "minute", hours = 24) {
   return useQuery({
-    queryKey: ["series", endpointId, from, to, bucket],
-    queryFn: () => api.series(endpointId!, from, to, bucket),
+    // Chave ESTÁVEL (endpoint + bucket). A janela from/to é calculada NA hora
+    // do fetch: se ela entrasse na chave, cada render gerava uma chave nova →
+    // fetch infinito (gráfico preso em "Carregando…") e rajada de requests.
+    queryKey: ["series", endpointId, bucket],
+    queryFn: () => api.series(endpointId!, isoHoursAgo(hours), new Date().toISOString(), bucket),
     enabled: endpointId != null,
     staleTime: 30_000,
   });

@@ -14,14 +14,12 @@ const PERIODS: { key: Period; hours: number; bucket: "minute" | "hour" | "day" }
   { key: "30d", hours: 24 * 30, bucket: "day" },
 ];
 
-function isoHoursAgo(h: number): string {
-  return new Date(Date.now() - h * 3600_000).toISOString();
-}
-
 export function ChartPanel({ ep }: { ep: PublicEndpoint }) {
   const [period, setPeriod] = useState<Period>("24h");
   const p = PERIODS.find((x) => x.key === period)!;
-  const series = useSeries(ep.id, isoHoursAgo(p.hours), new Date().toISOString(), p.bucket);
+  // Janela calculada dentro da query (chave estável por bucket) — ver
+  // useSeries em hooks/queries.ts.
+  const series = useSeries(ep.id, p.bucket, p.hours);
 
   const rows = useMemo(() => (series.data?.items ?? []).filter((x) => x.count > 0), [series.data]);
 
@@ -45,6 +43,8 @@ export function ChartPanel({ ep }: { ep: PublicEndpoint }) {
       </div>
       {series.isFetching ? (
         <Spinner label="Carregando gráficos…" />
+      ) : series.isError ? (
+        <p className="text-xs text-rose-400">Falha ao carregar os gráficos. Recarregue a página.</p>
       ) : rows.length === 0 ? (
         <p className="text-xs text-slate-500">Sem dados de rollups neste período.</p>
       ) : (

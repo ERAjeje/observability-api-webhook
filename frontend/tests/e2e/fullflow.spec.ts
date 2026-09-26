@@ -156,3 +156,63 @@ test.describe("Status page pública + painel admin (RF-019/023, T4.3)", () => {
     expect(bad.status()).toBe(400);
   });
 });
+
+// Regressão (RF-020/RNF-014): o painel de gráficos de um card deve ASSENTAR ao
+// clicar em "gráfico". Bug antigo: a chave do useSeries levava from/to (ISO com
+// milissegundos, recalculados a cada render) → fetch infinito, spinner
+// "Carregando gráficos…" eterno e rajadas de requests que estouravam o rate
+// limit do nginx (503).
+test.describe("Regressão: gráficos da status page (RF-020)", () => {
+  const EP_NAME = "chart-e2e";
+
+  // Provisiona um endpoint saudável (backend checando a si mesmo) para a
+  // regressão ser reprodutível em stack limpa — não depende da demo persisted.
+  test.beforeAll(async ({ browser }) => {
+    const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
+    const request = ctx.request;
+    const token = await apiLogin(request);
+    const h = { Authorization: `Bearer ${token}` };
+
+    const list = await request.get("/api/v1/admin/endpoints/", { headers: h });
+    const eps = (await list.json() as { items: { id: number; name: string }[] }).items;
+    for (const ep of eps) {
+      if (ep.name === EP_NAME) {
+        await request.delete(`/api/v1/admin/endpoints/${ep.id}`, { headers: h });
+      }
+    }
+    const created = await request.post("/api/v1/admin/endpoints/", {
+      headers: h,
+      data: { name: EP_NAME, url: "http://127.0.0.1:8080/healthz", method: "GET", interval_seconds: 15, timeout_ms: 3000 },
+    });
+    expect(created.status(), `criar endpoint chart: ${await created.text()}`).toBe(201);
+    await ctx.close();
+  });
+
+  test("clicar em 'gráfico' renderiza o painel sem travar em 'Carregando…'", async ({ page }) => {
+    await page.goto("/");
+    const card = page.locator(".rounded-xl", { hasText: EP_NAME }).first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    const spinner = card.getByText("Carregando gráficos…");
+    const chartOrEmpty = card
+      .locator('text="Latência"')
+      .or(card.getByText("Sem dados de rollups neste período."));
+
+    await card.getByRole("button", { name: "gráfico" }).click();
+
+    // O lazy + a query (chave estável) devem resolver: o spinner some.
+    await expect(spinner).toBeHidden({ timeout: 20_000 });
+    // E o painel renderiza (latência/uptime) ou reporta explicitamente vazio.
+    await expect(chartOrEmpty.first()).toBeVisible({ timeout: 10_000 });
+
+    // Deixa os eventos SSE (rollup_updated) fluírem e garante que o painel não
+    // volta a travar nas refetches (sem loop de chave).
+    await page.waitForTimeout(12_000);
+    await expect(spinner).toBeHidden();
+
+    // Trocar de período dispara um fetch novo e também assenta.
+    await card.getByRole("tab", { name: "7d" }).click();
+    await expect(spinner).toBeHidden({ timeout: 20_000 });
+    await expect(chartOrEmpty.first()).toBeVisible({ timeout: 10_000 });
+  });
+});

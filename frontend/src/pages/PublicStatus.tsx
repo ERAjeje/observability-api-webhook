@@ -64,10 +64,14 @@ export default function PublicStatus() {
       setOpenIncidents((prev) => prev.filter((i) => i.id !== Number(ev.incident_id)));
       void queryClient.invalidateQueries({ queryKey: ["incidents"] });
     });
-    const ru = sse.on("rollup_updated", () => {
-      // Atualiza gráficos expandidos sem recarregar a página (RF-021).
-      void queryClient.invalidateQueries({ queryKey: ["series"] });
-      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+    const ru = sse.on("rollup_updated", (ev) => {
+      // Atualiza só o endpoint que mudou (gráficos expandidos + resumo) sem
+      // recarregar a página (RF-021). Invalidar TUDO aqui gera N refetches a
+      // cada check cadastrado, estourando o rate limit do nginx (503).
+      const id = Number(ev.endpoint_id);
+      if (!Number.isFinite(id) || id <= 0) return;
+      void queryClient.invalidateQueries({ queryKey: ["summary", id] });
+      void queryClient.invalidateQueries({ queryKey: ["series", id] });
     });
     const er = sse.on("endpoint_removed", (ev: SSEEvent) => {
       setEndpoints((prev) => {
