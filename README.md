@@ -60,11 +60,12 @@ cadastrados, logs de latência/status e **status page pública em tempo real**.
     conectividade), logs filtráveis/paginados, estatísticas, config de alertas
     e branding (settings dinâmicos, T4.5) e auditoria de notificações.
   - **E2E Playwright** — 4 cenários verdes contra a stack Docker (UC-01/UC-05).
-- **Fase 5 — Integração final + Hardening (S-05)**: CI (workflow + `make ci`), Deploy VPS
+- **Fase 5 — Integração final + Hardening (S-05/S-08)**: CI (workflow + `make ci`), Deploy VPS
   (`deploy/provision.sh`, TLS acme.sh), **Sobrecarga** (800 endpoints em burst — corrigido um
   **double-run** real do scheduler com snapshot obsoleto), **Observabilidade** (`GET /metrics`
-  Prometheus text) e **S-05**: headers dos endpoints **cifrados em repouso** (AES-256-GCM,
-  `HEADERS_ENC_KEY`).
+  Prometheus text) e hardening de segurança: **S-05** headers **cifrados em repouso** (AES-256-GCM,
+  `HEADERS_ENC_KEY`) e **S-08** cotas por conta (máx. endpoints, intervalo mínimo, projeção checks/mês)
+  → **HTTP 429** no painel admin.
 
 **Cobertura de testes** (com `-race`): todos os pacotes Go verdes — api, auth,
 broker, checker, domain, engine, metrics, notifier, scheduler, seal, storage, worker.

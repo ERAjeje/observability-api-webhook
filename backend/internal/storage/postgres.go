@@ -44,7 +44,7 @@ func (p *PgStore) Close() { p.pool.Close() }
 
 // ─── Endpoints ────────────────────────────────────────────────────────────
 
-const endpointCols = `id, group_id, name, url, method, headers, body,
+const endpointCols = `id, owner_id, group_id, name, url, method, headers, body,
 	interval_seconds, timeout_ms, lat_threshold_ms, expect_status, expect_body,
 	active, status, next_check_at, created_at, updated_at`
 
@@ -53,7 +53,7 @@ func scanEndpoint(row pgx.Row) (domain.Endpoint, error) {
 	var groupID *int64
 	var intervalS, timeoutMS, latThr int
 	if err := row.Scan(
-		&e.ID, &groupID, &e.Name, &e.URL, &e.Method, &e.Headers, &e.Body,
+		&e.ID, &e.OwnerID, &groupID, &e.Name, &e.URL, &e.Method, &e.Headers, &e.Body,
 		&intervalS, &timeoutMS, &latThr, &e.ExpectStatus, &e.ExpectBody,
 		&e.Active, &e.Status, &e.NextCheckAt, &e.CreatedAt, &e.UpdatedAt,
 	); err != nil {
@@ -72,12 +72,12 @@ func (p *PgStore) CreateEndpoint(ctx context.Context, e domain.Endpoint) (int64,
 	latThr := int(e.LatencyThreshold.Milliseconds())
 	var id int64
 	err := p.pool.QueryRow(ctx, `
-		INSERT INTO endpoints (group_id, name, url, method, headers, body,
+		INSERT INTO endpoints (owner_id, group_id, name, url, method, headers, body,
 			interval_seconds, timeout_ms, lat_threshold_ms, expect_status, expect_body,
 			active, status, next_check_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
 		RETURNING id`,
-		e.GroupID, e.Name, e.URL, e.Method, e.Headers, e.Body,
+		e.OwnerID, e.GroupID, e.Name, e.URL, e.Method, e.Headers, e.Body,
 		intervalS, timeoutMS, latThr, e.ExpectStatus, e.ExpectBody,
 		e.Active, domain.StatusUnknown,
 	).Scan(&id)
@@ -97,6 +97,26 @@ func (p *PgStore) GetEndpoint(ctx context.Context, id int64) (domain.Endpoint, e
 func (p *PgStore) ListEndpoints(ctx context.Context) ([]domain.Endpoint, error) {
 	rows, err := p.pool.Query(ctx,
 		`SELECT `+endpointCols+` FROM endpoints ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Endpoint
+	for rows.Next() {
+		e, err := scanEndpoint(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListEndpointsByOwner devolve os endpoints de uma conta (S-08).
+// ownerID = 0 devolve apenas endpoints legados sem dono.
+func (p *PgStore) ListEndpointsByOwner(ctx context.Context, ownerID int64) ([]domain.Endpoint, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT `+endpointCols+` FROM endpoints WHERE owner_id=$1 ORDER BY id`, ownerID)
 	if err != nil {
 		return nil, err
 	}

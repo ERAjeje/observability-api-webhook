@@ -98,6 +98,20 @@ func (m *MemStore) ListDueEndpoints(_ context.Context, now time.Time, atMost int
 	return out, nil
 }
 
+// ListEndpointsByOwner devolve os endpoints de uma conta (S-08).
+// ownerID = 0 devolve apenas endpoints legados sem dono.
+func (m *MemStore) ListEndpointsByOwner(_ context.Context, ownerID int64) ([]domain.Endpoint, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []domain.Endpoint
+	for _, e := range m.endpoints {
+		if e.OwnerID == ownerID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 func (m *MemStore) UpdateEndpoint(_ context.Context, e domain.Endpoint) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

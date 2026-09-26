@@ -64,6 +64,12 @@ type Config struct {
 	// nil = modo texto plano (dev). Em produção com blob cifrado no banco e
 	// chave ausente, o engine segue fail-closed (sem headers, sem vazar blob).
 	HeadersSecret []byte
+
+	// S-08 — cotas por conta (429 quando excedidas). ChecksPerMonthQuota 0
+	// deriva o teto de MaxEndpointsPerAccount × 30d/MinCheckInterval.
+	MaxEndpointsPerAccount int
+	MinCheckInterval       time.Duration
+	ChecksPerMonthQuota    int64
 }
 
 // Load constrói a Config a partir do ambiente com defaults documentados em
@@ -108,6 +114,11 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	cfg.HeadersSecret = headersKey
+
+	// S-08: cotas por conta (valores abaixo de 1 = desabilitadas).
+	cfg.MaxEndpointsPerAccount = getInt("MAX_ENDPOINTS_PER_ACCOUNT", 50)
+	cfg.MinCheckInterval = time.Duration(getInt("MIN_CHECK_INTERVAL_SECONDS", 10)) * time.Second
+	cfg.ChecksPerMonthQuota = int64(getInt("CHECKS_PER_MONTH_QUOTA", 0))
 
 	if cfg.WorkerPoolSize < 1 {
 		return cfg, fmt.Errorf("WORKER_POOL_SIZE deve ser >= 1 (got %d)", cfg.WorkerPoolSize)

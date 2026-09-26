@@ -33,6 +33,7 @@ const (
 // (RF-001..RF-005).
 type Endpoint struct {
 	ID               int64
+	OwnerID          int64 // conta que cadastrou (0 = legado/sem dono) — S-08
 	GroupID          *int64
 	Name             string
 	URL              string

@@ -52,8 +52,11 @@ if [ ! -f .env ]; then
   cp .env.example .env
   sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env
   sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 32)|" .env
+  # S-05: chave AES-256 p/ cifrar headers dos endpoints em repouso. Se for
+  # vazia no ambiente final, headers voltam a texto plano — sempre gerar.
+  sed -i "s|^HEADERS_ENC_KEY=.*|HEADERS_ENC_KEY=$(openssl rand -hex 32)|" .env
   sed -i "s|^ENV=.*|ENV=production|" .env
-  echo "  .env gerado com DB_PASSWORD e JWT_SECRET aleatórios"
+  echo "  .env gerado com DB_PASSWORD/JWT_SECRET/HEADERS_ENC_KEY aleatórios"
 else
   echo "  .env já existe — mantido"
 fi

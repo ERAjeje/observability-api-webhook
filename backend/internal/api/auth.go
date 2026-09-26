@@ -129,6 +129,13 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// userIDFrom devolve o dono autenticado montado por requireAuth (S-08).
+// 0 = contexto sem identidade (fluxo não autenticado).
+func userIDFrom(ctx context.Context) int64 {
+	id, _ := ctx.Value(ctxUserID).(int64)
+	return id
+}
+
 // clientIP devolve o IP do cliente (usa X-Forwarded-For quando atrás do Nginx).
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

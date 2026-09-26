@@ -182,3 +182,9 @@
 - [x] **Hardening S-05** (headers em repouso): `internal/seal` AES-256-GCM (`HEADERS_ENC_KEY`, 64 hex),
   envelope `$seal_v1` no jsonb; decifra no engine (checagem) e no admin autenticado; público nunca vaza
   (RNF-018); update re-cifra; **fail-closed** sem chave com blob presente. Validado ao vivo no Postgres.
+- [x] **Hardening S-08** (cotas por conta → **429**): `owner_id` nos endpoints (migração 000005, backfill
+  p/ 1ª conta) + `internal/quota` — máx. endpoints por conta, intervalo mínimo e projeção de checks/mês
+  (derivada = endpoints × 30d/intervalo). Cotas configuráveis por env
+  (`MAX_ENDPOINTS_PER_ACCOUNT`, `MIN_CHECK_INTERVAL_SECONDS`, `CHECKS_PER_MONTH_QUOTA`); violações
+  devolvem **HTTP 429** com mensagem amigável no create/update (IP+mensagem: o painel mostra ao usuário).
+  Validado ao vivo: 5 endpoints OK → 6º 429; intervalo 5s < 10s → 429 no create e no update.

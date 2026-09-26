@@ -12,6 +12,7 @@ import (
 
 	"monitor/internal/checker"
 	"monitor/internal/domain"
+	"monitor/internal/quota"
 	"monitor/internal/seal"
 	"monitor/internal/storage"
 )
@@ -84,6 +85,7 @@ func (s *Server) endpointDTO(e domain.Endpoint) map[string]any {
 	}
 	return map[string]any{
 		"id":                   e.ID,
+		"owner_id":             e.OwnerID,
 		"group_id":             e.GroupID,
 		"name":                 e.Name,
 		"url":                  e.URL,
@@ -126,6 +128,21 @@ func (s *Server) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
+// handleQuotaErr mapeia violação de cota (S-08) para HTTP 429 com a mensagem
+// amigável; demais erros viram 500. Retorna true quando já respondeu.
+func (s *Server) handleQuotaErr(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if quota.IsErrQuotaExceeded(err) {
+		writeErr(w, http.StatusTooManyRequests, err.Error())
+		return true
+	}
+	slog.Error("api: falha ao avaliar cota", "err", err)
+	writeErr(w, http.StatusInternalServerError, "falha ao avaliar cota")
+	return true
+}
+
 // createEndpoint valida + persiste + sincroniza o scheduler (RF-016).
 func (s *Server) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	var b endpointBody
@@ -144,6 +161,13 @@ func (s *Server) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	if err := validateTargetOrReject(e.URL, s.allowPrivate); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// S-08: vincula a conta autenticada e valida as cotas (429).
+	e.OwnerID = userIDFrom(r.Context())
+	if s.quota != nil {
+		if err := s.quota.CheckCreate(r.Context(), e.OwnerID, e); s.handleQuotaErr(w, err) {
+			return
+		}
 	}
 	// S-05: cifra headers antes de persistir (AES-256-GCM em repouso).
 	if _, err := seal.EncryptEndpointHeaders(&e, s.sealKey); err != nil {
@@ -199,6 +223,13 @@ func (s *Server) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.ID = id
+	// Carrega o registro atual cedo: dá 404 imediato, preserva o dono (S-08)
+	// e evita zerar o status na persistência.
+	cur, err := s.store.GetEndpoint(r.Context(), id)
+	if mapStoreErr(w, err) {
+		return
+	}
+	e.OwnerID = cur.OwnerID
 	if !s.validateGroupRef(r.Context(), e.GroupID) {
 		writeErr(w, http.StatusBadRequest, "grupo inexistente")
 		return
@@ -206,6 +237,12 @@ func (s *Server) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 	if err := validateTargetOrReject(e.URL, s.allowPrivate); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// S-08: revalida as cotas com o novo intervalo (substituindo o atual).
+	if s.quota != nil {
+		if err := s.quota.CheckUpdate(r.Context(), cur.OwnerID, id, e); s.handleQuotaErr(w, err) {
+			return
+		}
 	}
 	// S-05: cifra headers antes de persistir.
 	if _, err := seal.EncryptEndpointHeaders(&e, s.sealKey); err != nil {
@@ -220,10 +257,8 @@ func (s *Server) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Recarrega o estado persistido (status) para manter o runtime coerente.
-	live, err := s.store.GetEndpoint(r.Context(), id)
-	if err == nil {
-		e.Status = live.Status
-	}
+	// (o UPDATE não altera status; cur foi lido no início do handler).
+	e.Status = cur.Status
 	_ = s.eng.SyncEndpoint(r.Context(), e)
 	writeJSON(w, http.StatusOK, s.endpointDTO(e))
 }

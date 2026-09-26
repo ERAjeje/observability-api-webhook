@@ -36,8 +36,9 @@ Sobrecarga com fix de double-run, Observabilidade `/metrics`). Restam:
 - **[ ]** **Push para o remoto** → rodar o CI de verdade (GitHub Actions) e o **E2E em runner limpo**
 - **[ ]** **VPS**: executar `deploy/provision.sh` (TLS real), validar operação + backups (RNF-003)
 - **[ ]** **Sobrecarga em ambiente real**: N endpoints × 1 min contra o PostgreSQL (o load-test roda em memória)
-- **[ ]** Segurança do `docs/security-review.md`: **S-08** (cotas por conta/endpoint — 429) — **S-05 resolvido**
-  (headers cifrados em repouso, `HEADERS_ENC_KEY`) e **S-11 coberto** na infra do `deploy/README.md`.
+- **[ ]** Segurança do `docs/security-review.md`: restam apenas pendências **de infra/produto** —
+  **S-06/S-07/S-09/S-10** (hardening de produção no deploy: secrets fortes, digests de imagem, TLS real,
+  healthcheck real) — **S-05 e S-08 resolvidos** em código, **S-11 coberto** na infra do `deploy/README.md`.
 
 > ⚠️ Ao publicar no remoto, remover certificados locais de `deploy/nginx/certs` (gitignored) e
 > garantir que `frontend/dist` esteja atualizado (`make frontend-build`).

@@ -19,6 +19,7 @@ import (
 	"monitor/internal/engine"
 	"monitor/internal/migrate"
 	"monitor/internal/notifier"
+	"monitor/internal/quota"
 	"monitor/internal/settings"
 	"monitor/internal/storage"
 )
@@ -112,6 +113,13 @@ func run(log *slog.Logger) error {
 		log.Info("notifier: desabilitado (NOTIFY_ENABLED=false)")
 	}
 
+	// ─── S-08: cotas por conta (429) ──────────────────────────────────────
+	quotaSvc := quota.New(quota.Limits{
+		MaxEndpointsPerAccount: cfg.MaxEndpointsPerAccount,
+		MinInterval:            cfg.MinCheckInterval,
+		ChecksPerMonth:         cfg.ChecksPerMonthQuota,
+	}, store)
+
 	// ─── Servidor HTTP ───────────────────────────────────────────────────
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
@@ -121,6 +129,7 @@ func run(log *slog.Logger) error {
 			Settings:      settingsSvc,
 			Obs:           eng.Obs(),
 			HeadersSecret: cfg.HeadersSecret,
+			Quota:         quotaSvc,
 			SSEHeartbeat:  cfg.SSEHeartbeat,
 			AllowPrivate:  cfg.AllowPrivateTargets,
 			AuthRateMax:   cfg.AuthRateMax,
