@@ -14,6 +14,7 @@ import (
 	"monitor/internal/checker"
 	"monitor/internal/config"
 	"monitor/internal/domain"
+	"monitor/internal/metrics"
 	"monitor/internal/scheduler"
 	"monitor/internal/storage"
 	"monitor/internal/worker"
@@ -30,6 +31,7 @@ type Engine struct {
 	sm      *domain.StateMachine
 	log     *slog.Logger
 	metrics *worker.Metrics
+	obs     *metrics.Registry // observabilidade (RF-012, RNF-011)
 
 	mu       sync.Mutex
 	runtimes map[int64]*domain.EndpointRuntime
@@ -79,6 +81,10 @@ func New(ctx context.Context, cfg config.Config, store storage.Store, log *slog.
 	// Pool de workers — handler é o ciclo por job.
 	e.pool = worker.New(cfg.WorkerPoolSize, cfg.PoolQueueSize, e.handleJob, log)
 
+	// Observabilidade: registra métricas do pool + foto de estado do engine.
+	e.obs = metrics.New(e.pool.Metrics(), cfg.WorkerPoolSize)
+	e.obs.SetStatusSource(e.statusSnapshot)
+
 	// Scheduler — callbacks apontam para o engine.
 	e.sched = scheduler.New(store, log)
 	e.sched.Tick = cfg.SchedulerTick
@@ -108,7 +114,38 @@ func New(ctx context.Context, cfg config.Config, store storage.Store, log *slog.
 }
 
 // Metrics expõe as métricas do pool.
-func (e *Engine) Metrics() *worker.Metrics { return e.metrics }
+func (e *Engine) Metrics() *worker.Metrics { return e.pool.Metrics() }
+
+// Obs expõe o registro de observabilidade (RF-012; rota /metrics).
+func (e *Engine) Obs() *metrics.Registry { return e.obs }
+
+// statusSnapshot conta endpoints por estado para o gauge de status.
+func (e *Engine) statusSnapshot() metrics.StatusSnapshot {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var s metrics.StatusSnapshot
+	s.Active = len(e.runtimes)
+	for _, rt := range e.runtimes {
+		switch rt.Status {
+		case domain.StatusUp:
+			s.Up++
+		case domain.StatusDown:
+			s.Down++
+		case domain.StatusDegraded:
+			s.Degraded++
+		default:
+			s.Unknown++
+		}
+	}
+	return s
+}
+
+// publish centraliza a publicação de eventos no broker e contabiliza para
+// observabilidade (monitor_events_published_total — RNF-011).
+func (e *Engine) publish(ev broker.Event) {
+	e.obs.CountEvent()
+	e.broker.Publish(ev.Type, ev)
+}
 
 // Broker expõe o barramento (usado pelo SSE na Fase 3).
 func (e *Engine) Broker() *broker.Broker { return e.broker }
@@ -156,7 +193,7 @@ func (e *Engine) flushPending(ctx context.Context) {
 			e.log.Error("engine: upsert rollup falhou", "err", err)
 			return
 		}
-		e.broker.Publish(broker.EventRollupUpdated, broker.Event{
+		e.publish(broker.Event{
 			Type: broker.EventRollupUpdated, Timestamp: time.Now(),
 			EndpointID: r.EndpointID, Status: domain.StatusUnknown,
 			Bucket: r.Bucket, Count: r.Count, P50MS: r.P50LatencyMS,
@@ -215,6 +252,9 @@ func (e *Engine) handleJob(parentCtx context.Context, job worker.Job) error {
 	tr := e.sm.Apply(rt, out.Result, now)
 	e.mu.Unlock()
 
+	// Observabilidade: contador de checagens por resultado + histograma (RF-012).
+	e.obs.ObserveCheck(out.Result, out.LatencyMS)
+
 	// 1. Log bruto (batch writer).
 	e.appendCheck(domain.Check{
 		EndpointID: ep.ID, CheckedAt: now, Result: out.Result,
@@ -269,7 +309,8 @@ func (e *Engine) applyTransition(ctx context.Context, ep domain.Endpoint, rt *do
 		if err := e.store.SetEndpointStatus(ctx, ep.ID, tr.Status); err != nil {
 			e.log.Error("engine: persistir status falhou", "endpoint", ep.ID, "err", err)
 		}
-		e.broker.Publish(broker.EventStatusChanged, broker.Event{
+		e.obs.ObserveTransition()
+		e.publish(broker.Event{
 			Type: broker.EventStatusChanged, Timestamp: at, EndpointID: ep.ID,
 			Name: ep.Name, Status: tr.Status, From: rt.Status,
 		})
@@ -287,7 +328,8 @@ func (e *Engine) applyTransition(ctx context.Context, ep domain.Endpoint, rt *do
 			return
 		}
 		rt.IncidentID = incID
-		e.broker.Publish(broker.EventIncidentOpened, broker.Event{
+		e.obs.IncidentOpened()
+		e.publish(broker.Event{
 			Type: broker.EventIncidentOpened, Timestamp: at, EndpointID: ep.ID,
 			Name: ep.Name, IncidentID: incID, Status: domain.StatusDown,
 		})
@@ -303,7 +345,8 @@ func (e *Engine) applyTransition(ctx context.Context, ep domain.Endpoint, rt *do
 		}
 		rt.IncidentID = 0
 		dur := at.Sub(rt.IncidentStarted).Milliseconds()
-		e.broker.Publish(broker.EventIncidentClosed, broker.Event{
+		e.obs.IncidentClosed()
+		e.publish(broker.Event{
 			Type: broker.EventIncidentClosed, Timestamp: at, EndpointID: ep.ID,
 			Name: ep.Name, IncidentID: incID, DurationMS: dur, Status: domain.StatusUp,
 		})
@@ -344,7 +387,7 @@ func (e *Engine) DropEndpoint(id int64) {
 	e.mu.Lock()
 	delete(e.runtimes, id)
 	e.mu.Unlock()
-	e.broker.Publish(broker.EventEndpointRemoved, broker.Event{
+	e.publish(broker.Event{
 		Type: broker.EventEndpointRemoved, Timestamp: time.Now(), EndpointID: id,
 	})
 }

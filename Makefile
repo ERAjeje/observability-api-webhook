@@ -1,6 +1,6 @@
 # Makefile — Central de Monitoramento (T1.9)
 
-.PHONY: help build test test-race lint run migrate-up migrate-down docker-up docker-down docker-logs frontend-build clean
+.PHONY: help build test test-race lint run migrate-up migrate-down docker-up docker-down docker-logs frontend-build load-test ci clean
 
 help: ## Lista os alvos disponíveis
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'

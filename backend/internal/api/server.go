@@ -13,6 +13,7 @@ import (
 	"monitor/internal/auth"
 	"monitor/internal/broker"
 	"monitor/internal/domain"
+	"monitor/internal/metrics"
 	"monitor/internal/settings"
 	"monitor/internal/storage"
 )
@@ -29,6 +30,7 @@ type Config struct {
 	Auth         *auth.Service
 	Broker       *broker.Broker
 	Settings     *settings.Service
+	Obs          *metrics.Registry // observabilidade — rota /metrics (RF-012)
 	SSEHeartbeat time.Duration
 	AllowPrivate bool // libera faixas internas no teste de conectividade
 	AuthRateMax  int
@@ -43,6 +45,7 @@ type Server struct {
 	auth         *auth.Service
 	broker       *broker.Broker
 	settings     *settings.Service
+	obs          *metrics.Registry
 	sseHeartbeat time.Duration
 	allowPrivate bool
 	authLimiter  *RateLimiter
@@ -60,9 +63,13 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 		auth:         cfg.Auth,
 		broker:       cfg.Broker,
 		settings:     cfg.Settings,
+		obs:          cfg.Obs,
 		sseHeartbeat: cfg.SSEHeartbeat,
 		allowPrivate: cfg.AllowPrivate,
 		authLimiter:  NewRateLimiter(cfg.AuthRateMax, cfg.AuthRateWin),
+	}
+	if s.obs == nil {
+		s.obs = metrics.New(nil, 0) // endpoint sempre disponível (testes sem runtime)
 	}
 	if s.sseHeartbeat <= 0 {
 		s.sseHeartbeat = 15 * time.Second
@@ -77,6 +84,10 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 	// Health (Fase 1).
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
+
+	// Métricas de observabilidade (RF-012) — formato Prometheus text.
+	// Sem auth (scrape por Prometheus); em produção restrinja por rede (S-11).
+	r.Get("/metrics", s.metricsHandler)
 
 	// Auth (T3.1) — sem JWT.
 	r.Route("/api/v1/auth", func(r chi.Router) {

@@ -119,6 +119,7 @@ func run(log *slog.Logger) error {
 			Auth:         authSvc,
 			Broker:       eng.Broker(),
 			Settings:     settingsSvc,
+			Obs:          eng.Obs(),
 			SSEHeartbeat: cfg.SSEHeartbeat,
 			AllowPrivate: cfg.AllowPrivateTargets,
 			AuthRateMax:  cfg.AuthRateMax,

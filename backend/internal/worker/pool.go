@@ -107,6 +107,9 @@ func (p *Pool) TryEnqueue(job Job) bool {
 	}
 }
 
+// Metrics expõe os contadores do pool para o observatório (RF-012).
+func (p *Pool) Metrics() *Metrics { return &p.metrics }
+
 // InFlight retorna o número atual de jobs em execução.
 func (p *Pool) InFlight() int64 { return p.metrics.InFlight.Load() }
 

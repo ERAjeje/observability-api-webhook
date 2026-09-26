@@ -80,6 +80,15 @@ func (s *Scheduler) round(ctx context.Context, now time.Time) {
 			skipped++ // nunca enfileirar endpoint já em execução (RF-011)
 			continue
 		}
+		// Revalida se o endpoint AINDA está vencido no tempo atual: o snapshot
+		// (`due`) pode estar obsoleto quando um job do round anterior conclui
+		// durante esta iteração (liberando o guard + avançando next_check_at).
+		// Sem isso, um endpoint concluído seria re-enfileirado (double-run).
+		cur, err := s.store.GetEndpoint(ctx, ep.ID)
+		if err != nil || !cur.Active || cur.NextCheckAt.After(time.Now()) {
+			skipped++ // desativado ou já reagendado durante o snapshot
+			continue
+		}
 		if s.MarkInFlight != nil {
 			s.MarkInFlight(ep.ID)
 		}
