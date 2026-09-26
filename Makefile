@@ -1,6 +1,6 @@
 # Makefile — Central de Monitoramento (T1.9)
 
-.PHONY: help build test test-race lint run migrate-up migrate-down docker-up docker-down docker-logs clean
+.PHONY: help build test test-race lint run migrate-up migrate-down docker-up docker-down docker-logs frontend-build clean
 
 help: ## Lista os alvos disponíveis
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -34,6 +34,9 @@ docker-down: ## Derruba a stack
 
 docker-logs: ## Logs dos serviços
 	docker compose logs -f --tail=100
+
+frontend-build: ## Build do frontend (estáticos → frontend/dist)
+	cd frontend && npm ci && npm run build
 
 clean: ## Remove binários
 	rm -rf backend/bin

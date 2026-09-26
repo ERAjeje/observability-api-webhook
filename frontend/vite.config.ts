@@ -23,6 +23,12 @@ export default defineConfig({
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]",
+        manualChunks: {
+          // Recharts (admin) fora do bundle público para manter a status page
+          // enxuta (RNF-015/Lighthouse ≥ 90).
+          "vendor-charts": ["recharts"],
+          "vendor-react": ["react", "react-dom", "react-router-dom", "@tanstack/react-query"],
+        },
       },
     },
   },
