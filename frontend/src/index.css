@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+/* Tema dinâmico — a cor primária vem da API (GET /api/v1/config, RF-023).
+   Definimos aqui a variável usada nos componentes via style inline. */
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #0f172a; /* slate-900 */
+  color: #e2e8f0;
+}
+
+/* Foco visível (acessibilidade — WCAG). */
+:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+/* Scrollbar discreta nos painéis de gráfico. */
+.thin-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: #33415588;
+  border-radius: 999px;
+}

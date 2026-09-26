@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -94,29 +95,86 @@ func checkDTO(c domain.Check) map[string]any {
 	}
 }
 
-// seriesResponse monta a série a partir dos rollups (RNF-014).
-func (s *Server) seriesResponse(ctx context.Context, epID int64, from, to time.Time, limit int) ([]map[string]any, error) {
-	rollups, err := s.store.ListRollups(ctx, epID, from, to, limit)
+// seriesResponse monta a série a partir dos rollups (RNF-014). grain é a
+// granularidade de agregação: minute (default), hour, day — mantém o teto de
+// pontos (1.440) cobrindo períodos maiores sem perder histórico.
+func (s *Server) seriesResponse(ctx context.Context, epID int64, from, to time.Time, limit int, grain string) ([]map[string]any, error) {
+	rollups, err := s.store.ListRollups(ctx, epID, from, to, 0)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]map[string]any, 0, len(rollups))
-	for _, rl := range rollups {
+	out := aggregateGrain(rollups, grain)
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
+}
+
+var grainTrunc = map[string]func(time.Time) time.Time{
+	"minute": func(t time.Time) time.Time { return t.Truncate(time.Minute) },
+	"hour":   func(t time.Time) time.Time { return t.Truncate(time.Hour) },
+	"day":    func(t time.Time) time.Time { return t.Truncate(24 * time.Hour) },
+}
+
+// aggregateGrain agrupa rollups por minuto/hora/dia mantendo ok/sum/percentis.
+// P50/P95 de um grupo = valor máximo do sub-bucket (mesma aproximação do upsert
+// do PostgreSQL — documentada na arquitetura §5.2).
+func aggregateGrain(rollups []domain.Rollup, grain string) []map[string]any {
+	trunc := grainTrunc[grain]
+	if trunc == nil {
+		trunc = grainTrunc["minute"]
+	}
+	type acc struct {
+		bucket   time.Time
+		count    int64
+		okCount  int64
+		sum      int64
+		p50, p95 int64
+	}
+	groups := map[int64]acc{}
+	var keys []int64
+	for _, r := range rollups {
+		b := trunc(r.Bucket.UTC())
+		key := b.Unix()
+		a, ok := groups[key]
+		if !ok {
+			a.bucket = b
+			keys = append(keys, key)
+		}
+		a.count += r.Count
+		a.okCount += r.OKCount
+		a.sum += r.SumLatencyMS
+		if r.P50LatencyMS > a.p50 {
+			a.p50 = r.P50LatencyMS
+		}
+		if r.P95LatencyMS > a.p95 {
+			a.p95 = r.P95LatencyMS
+		}
+		groups[key] = a
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	out := make([]map[string]any, 0, len(keys))
+	for _, k := range keys {
+		a := groups[k]
 		uptime := 0.0
-		if rl.Count > 0 {
-			uptime = float64(rl.OKCount) / float64(rl.Count) * 100
+		if a.count > 0 {
+			uptime = float64(a.okCount) / float64(a.count) * 100
+		}
+		avg := int64(0)
+		if a.count > 0 {
+			avg = int64(float64(a.sum) / float64(a.count))
 		}
 		out = append(out, map[string]any{
-			"bucket":     rl.Bucket,
-			"count":      rl.Count,
-			"ok_count":   rl.OKCount,
-			"avg_ms":     rl.AvgLatencyMS(),
-			"p50_ms":     rl.P50LatencyMS,
-			"p95_ms":     rl.P95LatencyMS,
+			"bucket":     a.bucket,
+			"count":      a.count,
+			"ok_count":   a.okCount,
+			"avg_ms":     avg,
+			"p50_ms":     a.p50,
+			"p95_ms":     a.p95,
 			"uptime_pct": round2(uptime),
 		})
 	}
-	return out, nil
+	return out
 }
 
 // statsSeries devolve a série de latência/uptime a partir dos rollups
@@ -147,12 +205,23 @@ func (s *Server) statsSeries(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	items, err := s.seriesResponse(r.Context(), epID, from, to, limit)
+	items, err := s.seriesResponse(r.Context(), epID, from, to, limit, grainOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit})
+}
+
+// grainOf lê o parâmetro ?bucket=minute|hour|day (inválido → minute).
+func grainOf(r *http.Request) string {
+	g := r.URL.Query().Get("bucket")
+	switch g {
+	case "hour", "day":
+		return g
+	default:
+		return "minute"
+	}
 }
 
 // summaryResponse resume uptime (dia/semana/mês) e percentis atuais — RF-020.

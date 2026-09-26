@@ -110,7 +110,7 @@ func (s *Server) publicStatsSeries(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	items, err := s.seriesResponse(r.Context(), id, from, to, limit)
+	items, err := s.seriesResponse(r.Context(), id, from, to, limit, grainOf(r))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "falha ao ler rollups")
 		return
