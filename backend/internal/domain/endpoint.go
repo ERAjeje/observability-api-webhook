@@ -93,6 +93,7 @@ type Rollup struct {
 	Count        int64
 	OKCount      int64
 	SumLatencyMS int64
+	P50LatencyMS int64
 	P95LatencyMS int64
 }
 

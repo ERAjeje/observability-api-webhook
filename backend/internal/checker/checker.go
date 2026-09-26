@@ -34,14 +34,9 @@ type Checker struct {
 // New cria um Checker com transporte tunado e validação de destino
 // (allowPrivate libera faixas internas para lab/self-host controlado).
 func New(allowPrivate bool) *Checker {
-	tr := &http.Transport{
-		MaxIdleConns:        256,
-		MaxIdleConnsPerHost: 64,
-		IdleConnTimeout:     90 * time.Second,
-	}
 	return &Checker{
 		client: &http.Client{
-			Transport: &guardedTransport{base: tr, allowPrivate: allowPrivate},
+			Transport: NewGuardedTransport(allowPrivate),
 		},
 	}
 }

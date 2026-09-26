@@ -100,25 +100,25 @@
 
 ### 3.1 API administrativa (protegida)
 
-- [ ] **T3.1** Implementar autenticação: `signup`/`login` com bcrypt, **JWT** com expiração, middleware de proteção das rotas admin e **rate limit** em login/signup.
+- [x] **T3.1** Implementar autenticação: `signup`/`login` com bcrypt, **JWT** com expiração, middleware de proteção das rotas admin e **rate limit** em login/signup.
   - **Critério de aceitação:** rota admin sem token → **401** e sem vazamento de dados (RF-006); senha força bruta → **429** (RNF-017, RNF-019).
-- [ ] **T3.2** Implementar CRUD de `endpoints` e `check_groups` (REST `/api/v1/admin/...`): validação de URL (scheme/host) e **teste manual de conectividade** antes de salvar (RF-001..005).
+- [x] **T3.2** Implementar CRUD de `endpoints` e `check_groups` (REST `/api/v1/admin/...`): validação de URL (scheme/host) e **teste manual de conectividade** antes de salvar (RF-001..005).
   - **Critério de aceitação:** endpoint criado persiste e é observável no scheduler (cache invalidado na edição); ativar/desativar reflete imediatamente no agendamento (RF-016); desativado não gera checagem.
-- [ ] **T3.3** Implementar API de **logs e stats** (RF-018): listagem paginada de `checks` (filtro por endpoint/período/status) e séries de latência (`P50/P95`) + uptime % (dia/semana/mês) **somente de rollups** pré-computados.
+- [x] **T3.3** Implementar API de **logs e stats** (RF-018): listagem paginada de `checks` (filtro por endpoint/período/status) e séries de latência (`P50/P95`) + uptime % (dia/semana/mês) **somente de rollups** pré-computados.
   - **Critério de aceitação:** resposta usa rollups (nunca logs brutos — RNF-014); `LIMIT` de pontos por request; P95 de resposta < 300 ms com dados de teste (RNF-013).
 
 ### 3.2 API pública (status page)
 
-- [ ] **T3.4** Implementar endpoints públicos (sem auth): status atual de todos os endpoints, incidentes em aberto e timeline histórica (RF-019, RF-022).
+- [x] **T3.4** Implementar endpoints públicos (sem auth): status atual de todos os endpoints, incidentes em aberto e timeline histórica (RF-019, RF-022).
   - **Critério de aceitação:** respostas sem qualquer config/segredo (RNF-018); formato enxuto consumido pela status page; rota pública separada da admin (RNF-017).
 
 ### 3.3 Mensageria — Event Broker + SSE
 
-- [ ] **T3.5** Implementar `internal/broker` (pub/sub in-memory com mutex, fan-out por cópia) e handler **SSE** `/api/v1/events`: `text/event-stream`, **snapshot completo no connect**, heartbeat a cada 15s (RF-021, RNF-009, RNF-010).
+- [x] **T3.5** Implementar `internal/broker` (pub/sub in-memory com mutex, fan-out por cópia) e handler **SSE** `/api/v1/events`: `text/event-stream`, **snapshot completo no connect**, heartbeat a cada 15s (RF-021, RNF-009, RNF-010).
   - **Critério de aceitação:** 2 clientes conectados recebem o mesmo evento; snapshot enviado na abertura da conexão; heartbeat mantém o stream vivo no Nginx (RNF-009).
-- [ ] **T3.6** Publicar eventos de transição: `status_changed`, `incident_opened`, `incident_closed`, `rollup_updated` — conectados ao worker (Fase 2) sem acoplamento.
+- [x] **T3.6** Publicar eventos de transição: `status_changed`, `incident_opened`, `incident_closed`, `rollup_updated` — conectados ao worker (Fase 2) sem acoplamento.
   - **Critério de aceitação:** cada transição confirmada gera exatamente 1 evento; evento **sem dados sensíveis**; cliente reconectado recebe snapshot e não diverge (RNF-010, UC-05).
-- [ ] **T3.7** Implementar `internal/notifier`: alertas em transição por **e-mail (SMTP)** e **webhook** (Slack/Discord), **janela de supressão** (RF-027), retry com backoff (RNF-006), multi-canal com fallback (RNF-008) e auditoria em `notifications`.
+- [x] **T3.7** Implementar `internal/notifier`: alertas em transição por **e-mail (SMTP)** e **webhook** (Slack/Discord), **janela de supressão** (RF-027), retry com backoff (RNF-006), multi-canal com fallback (RNF-008) e auditoria em `notifications`.
   - **Critério de aceitação:** transição UP→DOWN entrega alerta ≤ **60 s** (RNF-005); repetição dentro da janela suprimida (UC-04); falha de um canal não impede o outro; payload registrado para auditoria (RF-029).
 
 > **✅ Barreira da Fase 3:** fluxo completo comprovado via `curl` — checagem → log → incidente → alerta e evento SSE; autenticação protege rotas admin; API de stats responde com rollups.

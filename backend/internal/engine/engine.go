@@ -156,9 +156,11 @@ func (e *Engine) flushPending(ctx context.Context) {
 			e.log.Error("engine: upsert rollup falhou", "err", err)
 			return
 		}
-		e.broker.Publish(broker.EventCheckRecorded, broker.Event{
-			Type: broker.EventCheckRecorded, Timestamp: time.Now(),
+		e.broker.Publish(broker.EventRollupUpdated, broker.Event{
+			Type: broker.EventRollupUpdated, Timestamp: time.Now(),
 			EndpointID: r.EndpointID, Status: domain.StatusUnknown,
+			Bucket: r.Bucket, Count: r.Count, P50MS: r.P50LatencyMS,
+			P95MS: r.P95LatencyMS, AvgMS: avgMillis(r),
 		})
 	}
 }
@@ -313,6 +315,31 @@ func (e *Engine) applyTransition(ctx context.Context, ep domain.Endpoint, rt *do
 // Pool expõe o pool (uso em testes/instrumentação).
 func (e *Engine) Pool() *worker.Pool { return e.pool }
 
+// SyncEndpoint registra/atualiza o runtime de um endpoint após CRUD admin e
+// antecipa o próximo check para pickup imediato pelo scheduler — "cache
+// invalidado na edição" (T3.2, RF-016).
+func (e *Engine) SyncEndpoint(ctx context.Context, ep domain.Endpoint) error {
+	e.mu.Lock()
+	rt, ok := e.runtimes[ep.ID]
+	if !ok {
+		rt = &domain.EndpointRuntime{}
+		e.runtimes[ep.ID] = rt
+	}
+	rt.Status = ep.Status
+	e.mu.Unlock()
+	return e.store.SetNextCheckAt(ctx, ep.ID, time.Now())
+}
+
+// DropEndpoint remove o runtime após delete (RNF-012 — remoção imediata).
+func (e *Engine) DropEndpoint(id int64) {
+	e.mu.Lock()
+	delete(e.runtimes, id)
+	e.mu.Unlock()
+	e.broker.Publish(broker.EventEndpointRemoved, broker.Event{
+		Type: broker.EventEndpointRemoved, Timestamp: time.Now(), EndpointID: id,
+	})
+}
+
 // RuntimeState retorna o estado atual de um endpoint (uso em testes).
 func (e *Engine) RuntimeState(id int64) (domain.StatusClass, int64, bool) {
 	e.mu.Lock()
@@ -357,18 +384,19 @@ func aggregateRollups(checks []domain.Check) []domain.Rollup {
 			Count:        int64(len(b.lats)),
 			OKCount:      b.ok,
 			SumLatencyMS: sum,
-			P95LatencyMS: p95(b.lats),
+			P50LatencyMS: percentile(b.lats, 0.50),
+			P95LatencyMS: percentile(b.lats, 0.95),
 		})
 	}
 	return out
 }
 
-// p95 retorna o percentil 95 de uma lista ordenada (ceil).
-func p95(sorted []int64) int64 {
+// percentile retorna o percentil p (0..1) de uma lista ordenada (ceil).
+func percentile(sorted []int64, p float64) int64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int(float64(len(sorted))*0.95+0.999) - 1
+	idx := int(float64(len(sorted))*p+0.999) - 1
 	if idx < 0 {
 		idx = 0
 	}
@@ -376,4 +404,15 @@ func p95(sorted []int64) int64 {
 		idx = len(sorted) - 1
 	}
 	return sorted[idx]
+}
+
+// p95 retorna o percentil 95 de uma lista ordenada (ceil).
+func p95(sorted []int64) int64 { return percentile(sorted, 0.95) }
+
+// avgMillis devolve a latência média de um rollup (arredondada para ms).
+func avgMillis(r domain.Rollup) int64 {
+	if r.Count == 0 {
+		return 0
+	}
+	return int64(float64(r.SumLatencyMS) / float64(r.Count))
 }

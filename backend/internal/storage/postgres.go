@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"monitor/internal/domain"
@@ -204,14 +205,15 @@ func (p *PgStore) AppendChecks(ctx context.Context, checks []domain.Check) error
 
 func (p *PgStore) UpsertRollup(ctx context.Context, r domain.Rollup) error {
 	_, err := p.pool.Exec(ctx, `
-		INSERT INTO check_rollups_minute (endpoint_id, bucket, count, ok_count, sum_latency_ms, p95_latency_ms)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO check_rollups_minute (endpoint_id, bucket, count, ok_count, sum_latency_ms, p50_latency_ms, p95_latency_ms)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (endpoint_id, bucket) DO UPDATE SET
 			count = check_rollups_minute.count + EXCLUDED.count,
 			ok_count = check_rollups_minute.ok_count + EXCLUDED.ok_count,
 			sum_latency_ms = check_rollups_minute.sum_latency_ms + EXCLUDED.sum_latency_ms,
+			p50_latency_ms = GREATEST(check_rollups_minute.p50_latency_ms, EXCLUDED.p50_latency_ms),
 			p95_latency_ms = GREATEST(check_rollups_minute.p95_latency_ms, EXCLUDED.p95_latency_ms)`,
-		r.EndpointID, r.Bucket, r.Count, r.OKCount, r.SumLatencyMS, r.P95LatencyMS)
+		r.EndpointID, r.Bucket, r.Count, r.OKCount, r.SumLatencyMS, r.P50LatencyMS, r.P95LatencyMS)
 	return err
 }
 
@@ -232,6 +234,259 @@ func (p *PgStore) CloseIncident(ctx context.Context, id int64, endedAt time.Time
 			duration_ms = EXTRACT(EPOCH FROM ($2 - started_at)) * 1000
 		WHERE id=$1`, id, endedAt)
 	return err
+}
+
+// ─── Groups (RF-005, T3.2) ────────────────────────────────────────────────
+
+func (p *PgStore) CreateGroup(ctx context.Context, g domain.CheckGroup) (int64, error) {
+	var id int64
+	err := p.pool.QueryRow(ctx, `
+		INSERT INTO check_groups (name, display_order)
+		VALUES ($1,$2) RETURNING id`,
+		g.Name, g.DisplayOrder).Scan(&id)
+	return id, err
+}
+
+func (p *PgStore) GetGroup(ctx context.Context, id int64) (domain.CheckGroup, error) {
+	var g domain.CheckGroup
+	err := p.pool.QueryRow(ctx,
+		`SELECT id, name, display_order, created_at FROM check_groups WHERE id=$1`, id).
+		Scan(&g.ID, &g.Name, &g.DisplayOrder, &g.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.CheckGroup{}, ErrNotFound
+	}
+	return g, err
+}
+
+func (p *PgStore) ListGroups(ctx context.Context) ([]domain.CheckGroup, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT id, name, display_order, created_at FROM check_groups
+		 ORDER BY display_order, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.CheckGroup
+	for rows.Next() {
+		var g domain.CheckGroup
+		if err := rows.Scan(&g.ID, &g.Name, &g.DisplayOrder, &g.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (p *PgStore) UpdateGroup(ctx context.Context, g domain.CheckGroup) error {
+	tag, err := p.pool.Exec(ctx,
+		`UPDATE check_groups SET name=$2, display_order=$3 WHERE id=$1`,
+		g.ID, g.Name, g.DisplayOrder)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *PgStore) DeleteGroup(ctx context.Context, id int64) error {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM check_groups WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ─── Users (T3.1) ─────────────────────────────────────────────────────────
+
+func (p *PgStore) CreateUser(ctx context.Context, u domain.User) (int64, error) {
+	var id int64
+	err := p.pool.QueryRow(ctx,
+		`INSERT INTO users (email, password_hash) VALUES ($1,$2) RETURNING id`,
+		u.Email, u.PasswordHash).Scan(&id)
+	if err != nil {
+		// 23505 = unique_violation (e-mail duplicado)
+		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
+			return 0, ErrConflict
+		}
+	}
+	return id, err
+}
+
+func (p *PgStore) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
+	var u domain.User
+	err := p.pool.QueryRow(ctx,
+		`SELECT id, email, password_hash, created_at FROM users WHERE email=$1`, email).
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, ErrNotFound
+	}
+	return u, err
+}
+
+// ─── Consultas (RF-018 / RF-022 / RF-029) ─────────────────────────────────
+
+func (p *PgStore) ListChecks(ctx context.Context, f CheckFilter) ([]domain.Check, error) {
+	query := `SELECT id, endpoint_id, checked_at, result, http_status, latency_ms, error_detail
+		FROM checks WHERE 1=1`
+	args := []any{}
+	add := func(cond string, val any) {
+		args = append(args, val)
+		query += fmt.Sprintf(" AND %s $%d", cond, len(args))
+	}
+	if f.EndpointID > 0 {
+		add("endpoint_id =", f.EndpointID)
+	}
+	if f.Result != "" {
+		add("result =", f.Result)
+	}
+	if !f.From.IsZero() {
+		add("checked_at >=", f.From)
+	}
+	if !f.To.IsZero() {
+		add("checked_at <=", f.To)
+	}
+	limit, offset := f.Limit, f.Offset
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query += fmt.Sprintf(" ORDER BY checked_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
+
+	rows, err := p.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Check
+	for rows.Next() {
+		var c domain.Check
+		if err := rows.Scan(&c.ID, &c.EndpointID, &c.CheckedAt, &c.Result, &c.HTTPStatus,
+			&c.LatencyMS, &c.ErrorDetail); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (p *PgStore) ListRollups(ctx context.Context, endpointID int64, from, to time.Time, limit int) ([]domain.Rollup, error) {
+	query := `SELECT endpoint_id, bucket, count, ok_count, sum_latency_ms, p50_latency_ms, p95_latency_ms
+		FROM check_rollups_minute WHERE endpoint_id = $1`
+	args := []any{endpointID}
+	if !from.IsZero() {
+		args = append(args, from)
+		query += fmt.Sprintf(" AND bucket >= $%d", len(args))
+	}
+	if !to.IsZero() {
+		args = append(args, to)
+		query += fmt.Sprintf(" AND bucket <= $%d", len(args))
+	}
+	query += " ORDER BY bucket"
+	if limit > 0 {
+		args = append(args, limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := p.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Rollup
+	for rows.Next() {
+		var r domain.Rollup
+		if err := rows.Scan(&r.EndpointID, &r.Bucket, &r.Count, &r.OKCount,
+			&r.SumLatencyMS, &r.P50LatencyMS, &r.P95LatencyMS); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *PgStore) GetIncident(ctx context.Context, id int64) (domain.Incident, error) {
+	var inc domain.Incident
+	err := p.pool.QueryRow(ctx,
+		`SELECT id, endpoint_id, started_at, ended_at, duration_ms, resolution
+		 FROM incidents WHERE id=$1`, id).
+		Scan(&inc.ID, &inc.EndpointID, &inc.StartedAt, &inc.EndedAt, &inc.DurationMS, &inc.Resolution)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Incident{}, ErrNotFound
+	}
+	return inc, err
+}
+
+func (p *PgStore) ListIncidents(ctx context.Context, openOnly bool, limit int) ([]domain.Incident, error) {
+	query := `SELECT id, endpoint_id, started_at, ended_at, duration_ms, resolution
+		FROM incidents`
+	if openOnly {
+		query += ` WHERE ended_at IS NULL`
+	}
+	query += ` ORDER BY started_at DESC`
+	if limit > 0 {
+		query += fmt.Sprintf(` LIMIT %d`, limit)
+	}
+	rows, err := p.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Incident
+	for rows.Next() {
+		var inc domain.Incident
+		if err := rows.Scan(&inc.ID, &inc.EndpointID, &inc.StartedAt, &inc.EndedAt,
+			&inc.DurationMS, &inc.Resolution); err != nil {
+			return nil, err
+		}
+		out = append(out, inc)
+	}
+	return out, rows.Err()
+}
+
+func (p *PgStore) CreateNotification(ctx context.Context, n domain.Notification) (int64, error) {
+	var id int64
+	err := p.pool.QueryRow(ctx, `
+		INSERT INTO notifications (endpoint_id, incident_id, channel, payload, delivered_at, status)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		n.EndpointID, n.IncidentID, n.Channel, []byte(n.Payload), n.DeliveredAt, n.Status).Scan(&id)
+	return id, err
+}
+
+func (p *PgStore) ListNotifications(ctx context.Context, endpointID int64, limit int) ([]domain.Notification, error) {
+	query := `SELECT id, endpoint_id, incident_id, channel, payload, delivered_at, status
+		FROM notifications WHERE 1=1`
+	args := []any{}
+	if endpointID > 0 {
+		args = append(args, endpointID)
+		query += fmt.Sprintf(" AND endpoint_id = $%d", len(args))
+	}
+	query += " ORDER BY id DESC"
+	if limit > 0 {
+		args = append(args, limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	rows, err := p.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Notification
+	for rows.Next() {
+		var n domain.Notification
+		if err := rows.Scan(&n.ID, &n.EndpointID, &n.IncidentID, &n.Channel, &n.Payload,
+			&n.DeliveredAt, &n.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // ─── Partições ────────────────────────────────────────────────────────────

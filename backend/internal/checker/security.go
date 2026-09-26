@@ -60,6 +60,17 @@ func ipBlocked(ip net.IP) bool {
 	return false
 }
 
+// NewGuardedTransport devolve um RoundTripper com pool de conexões e guarda
+// anti-SSRF (usado pelo checker e pelo notifier — reuso do controle S-01).
+func NewGuardedTransport(allowPrivate bool) http.RoundTripper {
+	tr := &http.Transport{
+		MaxIdleConns:        256,
+		MaxIdleConnsPerHost: 64,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	return &guardedTransport{base: tr, allowPrivate: allowPrivate}
+}
+
 // guardedTransport valida o destino a cada RoundTrip (momento do dial),
 // mitigando DNS rebinding entre a validação e a conexão real. O controle
 // definitivo é um firewall de egress na VPS — documentado no security-review.

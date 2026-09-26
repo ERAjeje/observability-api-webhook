@@ -40,7 +40,23 @@ type Config struct {
 	SSEHeartbeat time.Duration
 
 	// Auth (Fase 3).
-	JWTSecret string
+	JWTSecret   string
+	JWTTTL      time.Duration
+	AuthRateMax int           // tentativas de login/signup por janela (RNF-017)
+	AuthRateWin time.Duration // janela do rate limit
+
+	// Notifier (T3.7).
+	NotifyEnabled     bool
+	SMTPHost          string
+	SMTPPort          int
+	SMTPUser          string
+	SMTPPass          string
+	SMTPFrom          string
+	NotifyToEmail     string
+	NotifyWebhookURL  string
+	NotifySuppression time.Duration
+	NotifyRetries     int
+	NotifyTimeout     time.Duration
 }
 
 // Load constrói a Config a partir do ambiente com defaults documentados em
@@ -62,6 +78,20 @@ func Load() (Config, error) {
 		SuccessThreshold:    getInt("SUCCESS_THRESHOLD", 2),
 		SSEHeartbeat:        time.Duration(getInt("SSE_HEARTBEAT_SECONDS", 15)) * time.Second,
 		JWTSecret:           os.Getenv("JWT_SECRET"),
+		JWTTTL:              time.Duration(getInt("JWT_TTL_HOURS", 24)) * time.Hour,
+		AuthRateMax:         getInt("AUTH_RATE_LIMIT", 5),
+		AuthRateWin:         time.Duration(getInt("AUTH_RATE_WINDOW_SECONDS", 60)) * time.Second,
+		NotifyEnabled:       getBool("NOTIFY_ENABLED", false),
+		SMTPHost:            os.Getenv("SMTP_HOST"),
+		SMTPPort:            getInt("SMTP_PORT", 587),
+		SMTPUser:            os.Getenv("SMTP_USER"),
+		SMTPPass:            os.Getenv("SMTP_PASS"),
+		SMTPFrom:            os.Getenv("SMTP_FROM"),
+		NotifyToEmail:       os.Getenv("NOTIFY_TO_EMAIL"),
+		NotifyWebhookURL:    os.Getenv("NOTIFY_WEBHOOK_URL"),
+		NotifySuppression:   time.Duration(getInt("NOTIFY_SUPPRESSION_SECONDS", 300)) * time.Second,
+		NotifyRetries:       getInt("NOTIFY_RETRIES", 3),
+		NotifyTimeout:       time.Duration(getInt("NOTIFY_TIMEOUT_SECONDS", 5)) * time.Second,
 	}
 
 	if cfg.WorkerPoolSize < 1 {

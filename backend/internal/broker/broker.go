@@ -12,7 +12,7 @@ import (
 
 // Event é um evento de domínio publicado pelo engine.
 type Event struct {
-	Type       string // status_changed | incident_opened | incident_closed | check_recorded
+	Type       string // status_changed | incident_opened | incident_closed | rollup_updated | endpoint_removed
 	Timestamp  time.Time
 	EndpointID int64
 	Name       string
@@ -20,13 +20,20 @@ type Event struct {
 	From       domain.StatusClass
 	IncidentID int64
 	DurationMS int64
+	// Dados de rollup (rollup_updated).
+	Bucket time.Time
+	Count  int64
+	P50MS  int64
+	P95MS  int64
+	AvgMS  int64
 }
 
 const (
-	EventStatusChanged  = "status_changed"
-	EventIncidentOpened = "incident_opened"
-	EventIncidentClosed = "incident_closed"
-	EventCheckRecorded  = "check_recorded"
+	EventStatusChanged   = "status_changed"
+	EventIncidentOpened  = "incident_opened"
+	EventIncidentClosed  = "incident_closed"
+	EventRollupUpdated   = "rollup_updated"
+	EventEndpointRemoved = "endpoint_removed"
 )
 
 const subBuffer = 256

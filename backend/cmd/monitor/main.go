@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"monitor/internal/api"
+	"monitor/internal/auth"
 	"monitor/internal/config"
 	"monitor/internal/engine"
 	"monitor/internal/migrate"
+	"monitor/internal/notifier"
 	"monitor/internal/storage"
 )
 
@@ -68,10 +70,53 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	// ─── Auth (T3.1) ─────────────────────────────────────────────────────
+	authSvc, err := auth.New(auth.Config{
+		Secret: cfg.JWTSecret,
+		TTL:    cfg.JWTTTL,
+		Issuer: "monitor",
+	})
+	if err != nil {
+		log.Warn("auth: desabilitado (JWT_SECRET ausente/inválido) — rotas admin com 401", "err", err)
+		// Sem serviço de auth, o middleware nega todas as rotas admin.
+	}
+
+	// ─── Notifier (T3.7) ─────────────────────────────────────────────────
+	var notif *notifier.Notifier
+	if cfg.NotifyEnabled {
+		notif = notifier.New(notifier.Config{
+			Enabled:      cfg.NotifyEnabled,
+			SMTPHost:     cfg.SMTPHost,
+			SMTPPort:     cfg.SMTPPort,
+			SMTPUser:     cfg.SMTPUser,
+			SMTPPass:     cfg.SMTPPass,
+			SMTPFrom:     cfg.SMTPFrom,
+			ToEmail:      cfg.NotifyToEmail,
+			WebhookURL:   cfg.NotifyWebhookURL,
+			Suppression:  cfg.NotifySuppression,
+			Retries:      cfg.NotifyRetries,
+			Timeout:      cfg.NotifyTimeout,
+			AllowPrivate: cfg.AllowPrivateTargets,
+		}, store, eng.Broker(), log)
+		go notif.Run(ctx)
+		log.Info("notifier: ativo",
+			"email", cfg.SMTPHost != "" && cfg.NotifyToEmail != "",
+			"webhook", cfg.NotifyWebhookURL != "")
+	} else {
+		log.Info("notifier: desabilitado (NOTIFY_ENABLED=false)")
+	}
+
 	// ─── Servidor HTTP ───────────────────────────────────────────────────
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           api.New(store).Handler(),
+		Addr: cfg.HTTPAddr,
+		Handler: api.New(api.Config{
+			Auth:         authSvc,
+			Broker:       eng.Broker(),
+			SSEHeartbeat: cfg.SSEHeartbeat,
+			AllowPrivate: cfg.AllowPrivateTargets,
+			AuthRateMax:  cfg.AuthRateMax,
+			AuthRateWin:  cfg.AuthRateWin,
+		}, store, eng).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

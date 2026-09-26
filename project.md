@@ -28,22 +28,22 @@ usuário, armazena **logs de latência/status** e fornece uma **página pública
 - Armazenamento de logs de latência/status por checagem.
 - Página pública de status em tempo real (SSE/WebSockets) com gráficos (uptime, latência, histórico).
 
-## 📌 Próximo passo — Fase 3 (API REST + SSE + Alertas)
+## 📌 Próximo passo — Fase 4 (Frontend: Dashboard + Status Page)
 
-✅ **Fases 1 e 2 concluídas** (setup + core engine). Próxima etapa:
+✅ **Fases 1, 2 e 3 concluídas** (setup + core engine + API REST/SSE/notifier). Próxima etapa:
 
-- **[ ]** **T3.1** Auth JWT + bcrypt + rate limit (rotas admin)
-- **[ ]** **T3.2** CRUD REST de endpoints/grupos + teste manual de conectividade
-- **[ ]** **T3.3** API de logs/stats (rollups, P50/P95, uptime)
-- **[ ]** **T3.4** API pública de status (sem auth) + timeline de incidentes
-- **[ ]** **T3.5/T3.6** SSE `/api/v1/events` (broker + snapshot no connect + heartbeat)
-- **[ ]** **T3.7** Notifier (e-mail/webhook, supressão, retry/backoff, auditoria)
+- **[ ]** **T4.1/T4.2** Scaffold React+Vite+Tailwind+React Query + cliente API/SSE
+- **[ ]** **T4.3** Login e CRUD de endpoints/grupos no dashboard admin
+- **[ ]** **T4.4** Logs/stats (tabela paginada + gráficos de latência/uptime)
+- **[ ]** **T4.5** Configuração de alertas (canais, supressão, limites)
+- **[ ]** **T4.6/T4.7** Status page pública (cards + Recharts) + SSE em tempo real
+- **[ ]** **T4.8/T4.9** E2E Playwright do fluxo completo (UC-01/UC-05)
 
-> ⚠️ Antes de iniciar a Fase 3: aplicar as correções da **varredura de segurança**
-> (ver `docs/security-review.md`).
+> ⚠️ Antes da Fase 4: revisar `docs/security-review.md` (achados S-05/S-08/S-11
+> recomendados para acompanhar a API).
 
 ## 📌 Decisões abertas (a definir durante o desenvolvimento)
 
-- Backend: Go vs Node.js.
-- Banco: PostgreSQL vs Redis + TimescaleDB.
-- Detalhamento da stack DevOps (Nginx, HTTPS, CI/CD).
+- Frontend: Vite + React Router vs Next.js (SPA estático no Nginx é o padrão assumido).
+- Painel de alertas: permitir criar alertas por endpoint individual ou só global (T4.5).
+- Detalhamento da stack DevOps (CI/CD, observabilidade).
