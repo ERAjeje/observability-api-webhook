@@ -1,0 +1,23 @@
+# Binaries / build artifacts
+backend/bin/
+backend/dist/
+*.exe
+*.test
+*.out
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Data / local state
+pgdata/
+*.log
+
+# Editor/OS
+.idea/
+.vscode/
+.DS_Store
+
+# Go
+vendor/
