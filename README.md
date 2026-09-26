@@ -1,183 +1,344 @@
-# Central de Monitoramento de APIs & Webhooks
+# 📡 Central de Monitoramento de APIs & Webhooks
 
-Status Page + Logger — verificação periódica de health-check em endpoints
-cadastrados, logs de latência/status e **status page pública em tempo real**.
+> 🌐 Leia esta página em [English](README.en.md).
 
-| Doc | Descrição |
-|-----|-----------|
-| [`docs/requirements.md`](docs/requirements.md) | Requisitos funcionais (RF-001..029) e não funcionais (RNF-001..020) |
-| [`docs/architecture.md`](docs/architecture.md) | Stack (Go · React · PostgreSQL), worker pools, SSE, Docker/Nginx |
-| [`docs/tasks.md`](docs/tasks.md) | Plano de execução em 4 fases (checkboxes + critérios) |
+Um sistema completo de **monitoramento de endpoints**: o operador cadastra os
+**health-checks** das suas APIs e webhooks, o sistema verifica em intervalos
+configuráveis, classifica cada checagem (`UP`/`DOWN`/`DEGRADED`), abre/fecha
+**incidentes** com janela de confirmação e entrega tudo numa **status page
+pública em tempo real** — com logs, gráficos e alertas.
 
----
+Duas experiências no mesmo produto:
 
-## 🧱 Stack
+- 🌍 **Público** — a status page (`/`) mostra cada serviço por grupo, seu estado
+  atual, gráficos de latência/uptime (24h/7d/30d) e a linha do tempo de
+  incidentes, atualizados **em tempo real via SSE** (UP→DOWN em ≤ 5 s sem
+  refresh). Sem segredos: nada de headers/tokens vaza para fora do painel.
+- 🔐 **Operador** — cria a conta em segundos e gerencia endpoints e grupos,
+  vê logs brutos e estatísticas, configura alertas (e-mail/SMTP ou webhook
+  Slack/Discord) e a identidade visual da status page, tudo por um painel
+  seguro com JWT, rate limit e **cotas por conta**.
 
-| Camada | Tecnologia |
-|--------|------------|
-| Backend | **Go ≥ 1.22** (Chi · pgx) — scheduler + worker pool com goroutines |
-| Frontend | **React + TypeScript + Tailwind CSS + Recharts** *(Fase 4)* |
-| Banco | **PostgreSQL ≥ 15** (checks particionada por mês + rollups por minuto) |
-| Tempo real | **SSE** (Server-Sent Events) *(Fase 3)* |
-| Deploy | **Docker Compose** + Dockerfile multi-stage (distroless) + **Nginx** |
-
----
-
-## ✅ Estado atual (Fases 1, 2, 3 e 4 concluídas)
-
-- **Fase 1 — Setup**: módulo Go, config por env, `pgxpool` + `/healthz` `/readyz`,
-  migração inicial com particionamento, Dockerfile multi-stage (**~14 MB**),
-  `docker-compose.yml` + Nginx (TLS, redirect, SSE sem buffer) e Makefile.
-- **Fase 2 — Core Engine**:
-  - `scheduler` — tick global, jitter ±20% (anti thundering herd), guarda de
-    sobreposição `in_flight` (RF-011) e **backpressure não-bloqueante**.
-  - `worker` — pool de K goroutines com canal bufferizado, **panic recovery**,
-    graceful drain e métricas atômicas (dropped/failed/in-flight).
-  - `checker` — HTTP check com timeout (RF-009), validação de status/body
-    (RF-010) e classificação `UP/DOWN/DEGRADED` por latência (RF-008) +
-    **guarda anti-SSRF** por padrão (S-01).
-  - `storage` — **MemStore** (dev/testes) e **PgStore** (produção), escrita em
-    **lote** + upsert de rollups.
-  - `domain` — state machine de confirmação N/M (RF-013): DOWN após 3 falhas,
-    UP após 2 sucessos; incidentes com abertura/fechamento (RF-017).
-  - `broker` — pub/sub in-memory alimentando o SSE (Fase 3).
-- **Fase 3 — API REST + SSE + Alertas**:
-  - `auth` — signup/login com **bcrypt + JWT** (expiração), middleware de rotas
-    admin e **rate limit** em login/signup (RNF-017).
-  - `api` — CRUD de endpoints/grupos (T3.2), logs/stats via **rollups**
-    (P50/P95/uptime — T3.3), status público sem segredos (T3.4) e **SSE
-    `/api/v1/events`** com snapshot + heartbeat (T3.5/T3.6).
-  - `notifier` — alertas por **e-mail (SMTP)** e **webhook** (Slack/Discord),
-    janela de supressão, retry com backoff e auditoria em `notifications`
-    (T3.7).
-- **Fase 4 — Frontend (status page + painel admin)**:
-  - Vite + React + TS + Tailwind + React Query + Recharts, com **code-split**
-    (Recharts fora do bundle público — Lighthouse/RNF-015).
-  - Status page pública: cards por grupo, gráficos 24h/7d/30d a partir de
-    **rollups**, timeline de incidentes, branding dinâmico via `/api/v1/config`
-    e **tempo real via SSE** (UP→DOWN em ≤ 5s sem refresh — RNF-009).
-  - Painel admin: login JWT, CRUD de endpoints/grupos (com teste de
-    conectividade), logs filtráveis/paginados, estatísticas, config de alertas
-    e branding (settings dinâmicos, T4.5) e auditoria de notificações.
-  - **E2E Playwright** — 4 cenários verdes contra a stack Docker (UC-01/UC-05).
-- **Fase 5 — Integração final + Hardening (S-05/S-08)**: Verificação local (`make verify`), Deploy VPS
-  (`deploy/provision.sh`, TLS acme.sh), **Sobrecarga** (800 endpoints em burst — corrigido um
-  **double-run** real do scheduler com snapshot obsoleto), **Observabilidade** (`GET /metrics`
-  Prometheus text) e hardening de segurança: **S-05** headers **cifrados em repouso** (AES-256-GCM,
-  `HEADERS_ENC_KEY`) e **S-08** cotas por conta (máx. endpoints, intervalo mínimo, projeção checks/mês)
-  → **HTTP 429** no painel admin.
-
-**Cobertura de testes** (com `-race`): todos os pacotes Go verdes — api, auth,
-broker, checker, domain, engine, metrics, notifier, quota, scheduler, seal, storage, worker.
-**Sobrecarga** validada em dois modos: `make load-test` (memória) e
-`make load-test-pg` (PostgreSQL real via container efêmero — 800 endpoints em
-burst, 0 drops, 0 double-runs). **Deploy** validado por `SKIP_TLS=1` (smoke
-local do `provision.sh` end-to-end: `.env` → build → stack → readyz).
-Frontend: `npm run build` verde + 4 cenários E2E Playwright.
+> **Status:** 🟢 Fases 1–5 concluídas · Setembro/2026 · stack completa em Docker
+> (API em ~14 MB · PostgreSQL · SPA React · nginx). Backend em Go com
+> **worker pool** e **scheduler** próprios (sem lib de terceiros), estatísticas
+> 100% a partir de **rollups pré-computados** e verificação de qualidade
+> **100% local** (`make verify`) — sem nenhum serviço remoto.
 
 ---
 
-## 🌐 API — referência rápida
+## O que o projeto faz
 
-| Rota | Auth | Descrição |
-|------|------|-----------|
-| `POST /api/v1/auth/signup` | — | cria conta (rate limit) |
-| `POST /api/v1/auth/login` | — | e-mail+senha → JWT (rate limit) |
-| `/api/v1/admin/endpoints` | **JWT** | CRUD + `POST /test` (conectividade) |
-| `/api/v1/admin/groups` | **JWT** | CRUD de grupos |
-| `/api/v1/admin/checks` | **JWT** | logs brutos paginados/filtráveis |
-| `/api/v1/admin/stats/*` | **JWT** | séries (rollups) + resumo uptime |
-| `/api/v1/admin/settings` | **JWT** | branding (RF-023) + canais de alerta (T4.5) |
-| `/api/v1/admin/notifications` | **JWT** | auditoria de alertas |
-| `GET /api/v1/status` | — | status atual (sem segredos) |
-| `GET /api/v1/incidents` | — | timeline de incidentes |
-| `GET /api/v1/config` | — | branding público da status page |
-| `GET /api/v1/status/{id}/stats/*` | — | séries/resumo por endpoint (rollups) |
-| `GET /api/v1/events` | — | SSE: snapshot + eventos + heartbeat |
+### Para o operador — em poucos passos
 
-```bash
-# Exemplo: criar conta e monitorar um endpoint
-TOKEN=$(curl -sk https://localhost/api/v1/auth/login -d '{"email":"adm@ex.com","password":"senha-segura-123"}' | jq -r .token)
-curl -sk -H "Authorization: Bearer $TOKEN" https://localhost/api/v1/admin/endpoints/ \
-  -d '{"name":"api-gw","url":"https://example.com/health","method":"GET","interval_seconds":60}'
-```
+1. **Cria a conta** (signup/login com bcrypt + JWT de 24 h e rate limit por
+   IP+e-mail).
+2. **Cadastra um endpoint** — URL, método, headers de autenticação, intervalo
+   de checagem (mínimo por conta), timeout, limite de latência, status e/ou
+   trecho de body esperados. Um **teste de conectividade** valida antes de
+   salvar e o **guarda anti-SSRF** bloqueia alvos internos por padrão.
+3. **O scheduler dispara as checagens** com jitter anti *thundering herd* e o
+   **worker pool** executa em paralelo com backpressure não-bloqueante. A
+   **state machine N/M** confirma: **DOWN só após 3 falhas** e **UP após 2
+   sucessos** (RF-013) — abrindo e fechando **incidentes** com duração.
+4. **Acompanha tudo**: status page pública em tempo real (SSE), logs brutos
+   filtráveis/paginados, gráficos 24h/7d/30d e **alertas** (SMTP ou webhook)
+   com janela de supressão, retry com backoff e auditoria.
 
----
+### O que a status page mostra (público)
 
-## 🚀 Como rodar
+- Cada grupo de serviços com seu estado atual (`UP`/`DOWN`/`DEGRADED`);
+- Gráficos de latência (P50/P95) e uptime por janela (24h, 7d, 30d) — servidos
+  de **rollups pré-computados**, nunca da tabela de checagens;
+- Linha do tempo de **incidentes** (abertura, fechamento, duração);
+- Identidade visual configurável pelo operador (`branding` dinâmico);
+- **Tempo real**: UP→DOWN refletido em ≤ 5 s sem refresh (SSE).
 
-### Rápido (Docker — produção local)
+> Os **headers de autenticação** dos endpoints são **cifrados em repouso**
+> (AES-256-GCM, `HEADERS_ENC_KEY`) e **nunca** aparecem fora do painel admin
+> autenticado — nem no HTML, nem nas rotas públicas (RNF-018).
 
-```bash
-cp .env.example .env          # ajuste JWT_SECRET
-make frontend-build           # compila a SPA (estáticos em frontend/dist)
-docker compose up --build -d  # postgres + backend + nginx (serve SPA + API)
-# Status page:  https://localhost/
-# Painel admin: /admin/login   · API: /api/v1/*
-curl -k https://localhost/healthz   # {"status":"ok"}
-```
+### Alertas que o sistema envia
 
-> Certificados TLS: gere self-signed em `deploy/nginx/certs/` ou use acme.sh.
-
-### E2E (Playwright) — requer a stack rodando
-
-```bash
-cd frontend && npx playwright install chromium
-npx playwright test           # 4 cenários: UC-01/UC-05, status page, login/CRUD, settings
-```
-
-### Desenvolvimento (backend com store em memória, sem Docker)
-
-```bash
-make run                      # DB_DSN vazio → MemStore
-# http://localhost:8080/healthz · /readyz
-```
-
-### Testes
-
-```bash
-make test        # go test ./...
-make test-race   # + detector de corrida
-make lint        # go vet
-```
+- Abertura e fechamento de incidentes, via **e-mail (SMTP)** e/ou **webhook**
+  (Slack/Discord), com **supressão** (300 s entre avisos do mesmo endpoint),
+  retry com backoff (até 3 tentativas) e auditoria em `notifications`.
 
 ---
 
-## 📁 Estrutura
+## Stack usada na construção
+
+| Camada | Tecnologia | Por quê |
+|---|---|---|
+| Backend | **Go** (Chi + pgx) | concorrência de goroutines no worker pool, binário distroless de ~14 MB, sem deps pesadas |
+| Scheduler + Pool | **implementação própria** | tick global com jitter ±20% (anti *thundering herd*), guarda `in_flight` (RF-011) e backpressure não-bloqueante — sem lib externa |
+| Banco | **PostgreSQL 15** | `checks` **particionada por mês** + `rollups` por minuto = retenção e dashboards escaláveis |
+| Tempo real | **SSE** (`/api/v1/events`) | snapshot na conexão + heartbeat (15 s): UP→DOWN em ≤ 5 s com servidor simples |
+| Frontend | **Vite + React + TS + Tailwind + Recharts** | SPA leve com **code-split** (Recharts fora do bundle público — RNF-015) |
+| Autenticação | **bcrypt + JWT (24 h)** | senhas com hash custoso; rotas admin protegidas + rate limit (RNF-017) |
+| Alertas | **SMTP + webhook** (fail-closed) | supressão + retry/backoff + auditoria; settings dinâmicos salvos (fallback por env) |
+| Segurança em repouso | **AES-256-GCM** (`HEADERS_ENC_KEY`) | headers/tokens dos endpoints cifrados no Postgres; fail-closed sem a chave (S-05) |
+| Cotas por conta | **`internal/quota`** | máx. endpoints, intervalo mínimo e projeção de checks/mês → **429** (S-08) |
+| Observabilidade | **`/metrics` (Prometheus text)** | registrador próprio, sem lib externa (RF-012) |
+| Deploy | **Docker Compose** + nginx | 1 comando sobe tudo; Dockerfile multi-stage → distroless nonroot; TLS (acme.sh) |
+| Verificação | **`make verify`** (100% local) | vet + testes `-race` + build/audit do frontend; **sem GitHub Actions / CI remoto** |
+
+### Decisões de engenharia que valem menção
+
+- **Estatísticas só de rollups pré-computados (RNF-014).** Nenhum dashboard
+  varre a tabela de checagens (particionada por mês): o engine agrega por
+  minuto (`count`, `ok_count`, soma de latência, P50/P95) e as rotas de gráfico
+  leem só essas séries. Consulta constante em qualquer volume.
+- **State machine de confirmação N/M (RF-013).** Transições não são reativas a
+  uma única falha: exigem 3 falhas consecutivas para `DOWN` e 2 sucessos para
+  `UP`, com janela configurável — incidentes só abrem de verdade quando há
+  consenso, evitando alarmes falsos.
+- **Backpressure que não perde trabalho.** A fila do pool é bufferizada e o
+  `Submit` é não-bloqueante; quando estoura, o scheduler `reprocessa` nos
+  próximos ticks. Validado num teste de carga que **pegou um double-run real**
+  (snapshot obsoleto do scheduler) — o fix revalida o vencimento de cada job
+  antes de enfileirar.
+- **SSE com snapshot + heartbeat.** Ao conectar, o cliente recebe o estado
+  atual de todos os endpoints; a partir daí, eventos incrementais. Reconexão é
+  trivial (novo snapshot) e um heartbeat de 15 s mantém a conexão viva atrás
+  de proxies (nginx sem buffer no caminho).
+- **Segredos cifrados em repouso (S-05).** Headers de autenticação vão para o
+  Postgres como um envelope `$seal_v1` AES-256-GCM; são descriptografados só
+  no engine (para checar) e no painel admin. Sem a chave, o sistema segue
+  **sem headers** — nunca vaza o segredo.
+- **Cotas por conta (S-08).** Um operador não pode auto-atacar a plataforma
+  com 1.000 endpoints a cada 1 s: há teto de endpoints, intervalo mínimo e
+  projeção de checagens/mês, com resposta `429` clara no create/update.
+- **Certificados de qualidade de verificação local.** A trilha de validação é
+  `make verify` (vet + testes `-race` + build/audit do front), `make load-test`
+  (memória) e `make load-test-pg` (PostgreSQL real), mais E2E Playwright —
+  com local simulation do deploy de VPS (`SKIP_TLS=1`).
+- **SSRF guard por padrão (S-01).** Alvos loopback/RFC1918/metadata de cloud
+  são bloqueados no cadastro, salvo `ALLOW_PRIVATE_TARGETS=true` (lab).
+
+---
+
+## Estrutura do monorepo
 
 ```
 project-3/
 ├── backend/
 │   ├── cmd/
-│   │   ├── monitor/          # entrypoint (graceful shutdown + health)
-│   │   └── migrate/          # runner de migrations (up/down)
+│   │   ├── monitor/              # entrypoint HTTP (graceful shutdown + health)
+│   │   └── migrate/              # runner de migrations (up/down)
 │   ├── internal/
-│   │   ├── api/              # REST admin/público + SSE
-│   │   ├── auth/             # JWT + bcrypt (T3.1)
-│   │   ├── broker/           # pub/sub p/ SSE
-│   │   ├── checker/          # execução HTTP + classificação + anti-SSRF
-│   │   ├── config/           # env → config validada
-│   │   ├── domain/           # entidades + state machine N/M
-│   │   ├── engine/           # orquestrador scheduler+pool+persistência
-│   │   ├── migrate/          # migrations embarcadas (go:embed)
-│   │   ├── notifier/         # alertas SMTP + webhook (T3.7)
-│   │   ├── scheduler/        # produção de jobs
-│   │   ├── storage/          # Store (MemStore · PgStore)
-│   │   └── worker/           # pool de goroutines
-│   └── Dockerfile            # multi-stage → distroless nonroot
-├── deploy/nginx/nginx.conf   # reverse proxy + SSE sem buffer
-├── docker-compose.yml
-├── frontend/                 # React + Vite + TS + Tailwind + Recharts (Fase 4)
-└── docs/                     # requirements · architecture · tasks
+│   │   ├── api/                  # handlers REST admin/público + SSE + /metrics
+│   │   ├── auth/                 # bcrypt + JWT + rate limit (RNF-017)
+│   │   ├── broker/               # pub/sub in-memory alimentando o SSE
+│   │   ├── checker/              # execução HTTP + timeout + anti-SSRF
+│   │   ├── config/               # env → config validada
+│   │   ├── domain/               # entidades + state machine N/M (RF-013)
+│   │   ├── engine/               # orquestrador: scheduler + pool + persistência
+│   │   ├── metrics/              # recursório Prometheus text (RF-012)
+│   │   ├── migrate/              # migrations embarcadas (go:embed)
+│   │   ├── notifier/             # alertas SMTP + webhook, supressão/retry
+│   │   ├── quota/                # cotas por conta → 429 (S-08)
+│   │   ├── scheduler/            # produção de jobs (tick + jitter + guard)
+│   │   ├── seal/                 # cifragem AES-256-GCM de headers (S-05)
+│   │   ├── settings/             # config dinâmica (branding/alertas)
+│   │   ├── storage/              # Store: MemStore · PgStore (lote + rollups)
+│   │   └── worker/               # pool de goroutines (backpressure)
+│   ├── Dockerfile                # multi-stage → distroless nonroot (~14 MB)
+├── frontend/                     # SPA Vite + React + TS + Tailwind + Recharts
+│   └── tests/e2e/                # Playwright — 4 cenários contra a stack Docker
+├── deploy/
+│   ├── nginx/nginx.conf          # reverse proxy TLS + SSE sem buffer + /metrics
+│   └── provision.sh              # bootstrapping da VPS (Docker + TLS acme.sh)
+├── docs/                         # requirements · architecture · tasks · security-review
+├── .env.example                  # modelo de configuração (sem credenciais)
+├── docker-compose.yml            # postgres + backend + nginx
+└── Makefile                      # orquestrador (build, test, verify, load-test*…)
 ```
+
+### API REST (`/api/v1`)
+
+| Grupo | Rotas principais |
+|---|---|
+| Público | `GET /status` · `GET /incidents` · `GET /config` · `GET /status/{id}/stats/summary` · `GET /status/{id}/stats/series` · `GET /events` (SSE) |
+| Painel (`/admin`, JWT) | CRUD `/endpoints` (+ `POST /test`) · CRUD `/groups` · `GET /checks` · `GET /stats/*` · `GET|PUT /settings` · `GET /notifications` |
+| Auth | `POST /signup` · `POST /login` |
+| Sondas | `GET /healthz` · `GET /readyz` · `GET /metrics` (Prometheus) |
+
+```bash
+# Exemplo: criar conta e monitorar um endpoint
+TOKEN=$(curl -sk https://localhost/api/v1/auth/login \
+  -d '{"email":"adm@ex.com","password":"senha-segura-123"}' | jq -r .token)
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  https://localhost/api/v1/admin/endpoints/ \
+  -d '{"name":"api-gw","url":"https://example.com/health","method":"GET","interval_seconds":60}'
+```
+
+Detalhes de contratos, modelo de dados e decisões: [docs/architecture.md](docs/architecture.md).
 
 ---
 
-## 🛤️ Roadmap (docs/tasks.md)
+## Como rodar em ambiente de desenvolvimento
 
-| Fase | Status |
-|------|--------|
-| 1 — Setup & Boilerplate | ✅ Concluída |
-| 2 — Core Engine (scheduler + worker pool) | ✅ Concluída |
-| 3 — API REST + SSE + Alertas | ✅ Concluída |
-| 4 — UI/UX Frontend (dashboard + status page) | ✅ Concluída |
+### Pré-requisitos
+
+- **Docker com Compose v2** (caminho recomendado — não precisa de Go, Node nem
+  PostgreSQL instalados);
+- Git (para clonar). Para rodar o backend nativo, **Go ≥ 1.22**; para o
+  frontend, **Node ≥ 20** / npm.
+
+### Passo a passo (recomendado)
+
+```bash
+# 1) clone e entre no projeto
+git clone <url-do-repositorio> && cd project-3
+
+# 2) gera o .env (segredos nunca versionados)
+cp .env.example .env        # edite JWT_SECRET (ou deixe para o provision.sh)
+
+# 3) compila a SPA e sobe tudo: postgres + backend + nginx (80/443)
+make frontend-build
+make docker-up              # ou: docker compose up --build -d
+```
+
+Aguarde o backend ficar `healthy` (10–40 s no primeiro build da imagem
+distroless) e confirme com as sondas:
+
+```bash
+curl -k https://localhost/healthz       # → ok
+curl -k https://localhost/readyz        # → {"status":"ok"}
+```
+
+> As **migrações rodam automaticamente** (`AUTO_MIGRATE`) no entrypoint da API.
+> O TLS local usa cert self-signed (gere em `deploy/nginx/certs/` ou use o
+> `provision.sh`).
+
+### O que fica acessível
+
+| O quê | URL | Observação |
+|---|---|---|
+| 🌍 Status page pública | `https://localhost/` | estado em tempo real por grupo + gráficos |
+| 🔐 Painel admin | `https://localhost/admin/login` | criar conta / login |
+| 📊 Métricas | `https://localhost/metrics` | formato Prometheus (proteja por firewall — S-11) |
+| 🗄️ PostgreSQL | interno ao Docker | não exposto na rede do host; use `docker compose exec postgres psql` |
+
+### Conta de demonstração
+
+O projeto **não semeia dados de demonstração** — criar a conta e os endpoints
+faz parte do roteiro abaixo. A suíte E2E usa `e2e@monitor.test` /
+`e2e-senha-segura-123` e cria tudo sozinha.
+
+### Alternativas de execução
+
+| Opção | Comando | Quando usar |
+|---|---|---|
+| **Stack completa em Docker** | `make docker-up` | ✨ recomendada para avaliar tudo |
+| **Backend nativo (MemStore)** | `make run` | mexer no backend em `:8080` sem banco |
+| **Sobrecarga (memória)** | `make load-test` | valida burst de 800 endpoints exatamente-once |
+| **Sobrecarga (PostgreSQL real)** | `make load-test-pg` | idem contra um container efêmero do Postgres |
+| **Verificação local completa** | `make verify` | vet + testes `-race` + build/audit do frontend |
+
+### Configuração (`.env`)
+
+Nada de senha no repositório; o `provision.sh` gera `DB_PASSWORD`, `JWT_SECRET`
+e `HEADERS_ENC_KEY` aleatórios. Variáveis-chave para testar as regras de
+negócio:
+
+| Variável | Default | Efeito |
+|---|---|---|
+| `JWT_SECRET` | — | assinatura dos tokens (obrigatória em produção) |
+| `DB_PASSWORD` | `monitor` | senha do Postgres |
+| `HEADERS_ENC_KEY` | vazio (texto plano em dev) | cifra headers em repouso (S-05) — 64 hex |
+| `MAX_ENDPOINTS_PER_ACCOUNT` | `50` | cota de endpoints por conta (S-08) |
+| `MIN_CHECK_INTERVAL_SECONDS` | `10` | intervalo mínimo por conta (S-08) |
+| `CHECKS_PER_MONTH_QUOTA` | `0` (derivada) | teto de checagens/mês projetado (S-08) |
+| `ALLOW_PRIVATE_TARGETS` | `false` | libera alvos internos no cadastro (SSRF guard) |
+| `FAIL_THRESHOLD` / `SUCCESS_THRESHOLD` | `3` / `2` | janela de confirmação da state machine (RF-013) |
+| `SMTP_*` · `NOTIFY_WEBHOOK_URL` · `NOTIFY_ENABLED` | desligado | canais de alerta (T3.7) |
+
+Modelo completo com comentários: [.env.example](.env.example).
+
+---
+
+## Como usar o produto (roteiro de demonstração)
+
+> **10 segundos:** acesse `https://localhost/` e veja a status page pública — e
+> em `https://localhost/admin/login` crie sua conta e cadastre o primeiro
+> endpoint.
+
+**Roteiro completo para mostrar a plataforma frente a frente:**
+
+1. **Crie uma conta** em `https://localhost/admin/login` (signup com e-mail e
+   senha). O painel abre com a lista de endpoints.
+2. **Cadastre 2 endpoints** (ex.: `https://api.github.com/zen` e
+   `https://example.com/health`) com intervalos de 1–5 min. Use o **teste de
+   conectividade** e repare que o painel lista o estado, os próximos checks e
+   os gráficos começando a se formar.
+3. **Tempo real (o diferencial)** — no lab com `ALLOW_PRIVATE_TARGETS=true`,
+   cadastre um alvo local e **derrube-o**: em até ~5 s a status page pública
+   (em outra aba, via SSE) marca `DOWN`, um **incidente** abre na timeline e
+   volta a fechar quando você religar o alvo (state machine: 3 falhas / 2
+   sucessos).
+4. **Alertas** — em *Settings* configure um webhook (Slack/Discord) ou SMTP e
+   veja os disparos listados na auditoria `notifications`. Dica: use o próprio
+   endpoint `https://discord.com/api/webhooks/...` como alvo para ver o alerta
+   chegando.
+5. **Cotas (S-08)** — tente cadastrar o endpoint nº `MAX+1` ou um com
+   `interval_seconds` menor que o mínimo da conta: a API responde **429** com
+   mensagem amigável que aparece no próprio formulário do painel.
+6. **Métricas** — `https://localhost/metrics` mostra pool, fila, checagens por
+   resultado, latência P50/P95 e eventos SSE (formato Prometheus).
+7. **Sobrecarga** — `make load-test` e `make load-test-pg` provam o pipeline
+   sob burst (800 endpoints, exatamente-one, 0 drops).
+
+---
+
+## Qualidade e testes
+
+- **Backend**: `make verify` → `go vet` + `go test -race ./...`. Todos os
+  pacotes verdes: `api, auth, broker, checker, domain, engine, metrics,
+  notifier, quota, scheduler, seal, storage, worker`.
+- **Sobrecarga**: `make load-test` (memória) e `make load-test-pg`
+  (PostgreSQL real) — **800 endpoints em burst**: 0 drops, 0 double-runs,
+  pico in-flight ≤ pool; backpressure sem deadlock. O teste `load` travou um
+  double-run real do scheduler (fix documentado no código).
+- **E2E**: Playwright — 4 cenários contra a stack Docker (UC-01/UC-05:
+  incidente + status page via SSE, status page/branding, login admin + CRUD,
+  settings de alertas). `cd frontend && npx playwright test`.
+- **Segurança**: varreduras documentadas em
+  [docs/security-review.md](docs/security-review.md) (S-01..S-24) com
+  govulncheck + gosec na verificação local — sem CI remoto.
+- **Deploy**: `make verify` local + smoke `SKIP_TLS=1` do
+  [deploy/provision.sh](deploy/provision.sh) validando `.env` → build → stack →
+  readyz em sandbox.
+
+---
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| [docs/requirements.md](docs/requirements.md) | Requisitos funcionais (RF-001..029) e não funcionais (RNF-001..020), casos de uso |
+| [docs/architecture.md](docs/architecture.md) | Arquitetura, modelo de dados (partições, rollups), SSE, ADRs |
+| [docs/tasks.md](docs/tasks.md) | Plano de execução em 5 fases (checkboxes + critérios de aceite) |
+| [docs/security-review.md](docs/security-review.md) | Varreduras de segurança (S-01..S-24) e status dos achados |
+| [deploy/README.md](deploy/README.md) | Deploy na VPS: provision, TLS acme.sh, operação, firewall |
+| [project.md](project.md) | Mapa do projeto e estado atual |
+
+---
+
+## Fluxo de trabalho (Git)
+
+`develop` é a trilha de integração (commits **Conventional Commits**); o
+remoto é **opcional e usado apenas como backup** — deliberadamente **sem
+GitHub Actions / CI** (toda validação é local via `make verify`). Novas
+features seguem commits pequenos com mensagens claras (`feat:`/`fix:`/`docs:`).
+
+## Releases
+
+| Tag | Conteúdo | Data |
+|---|---|---|
+| `v1.0.0` (planejada) | Fases 1–5 — engine completo, API + SSE + alertas, frontend status page + painel, hardening S-05/S-08 | Set/2026 |
+
+> Identidade visual da status page **configurável pelo operador** (título e
+> branding via `PUT /api/v1/admin/settings`) — RF-023; a SPA usa tema claro
+> padrão com paleta fácil de ajustar em `frontend/`.
