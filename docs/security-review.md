@@ -42,13 +42,13 @@ revisão manual encontrou um **risco crítico de SSRF** no checker, já mitigado
 
 | ID | Severidade | Achado | Recomendação |
 |----|------------|--------|--------------|
-| S-05 | **Alta (prod)** | **Headers dos endpoints monitorados** (`auth`, tokens) armazenados em **texto plano** no jsonb `endpoints.headers` (RNF-018). | Cifrar em repouso (age/AES-GCM com chave do env) ou externalizar segredos (vault/secrets manager). A API da Fase 3 **nunca** deve devolver `headers` ao frontend. |
+| S-05 | **Alta (prod)** | ~~Headers dos endpoints monitorados em texto plano no jsonb~~ — **RESOLVIDO (hardening)**: cifragem AES-256-GCM em repouso (`internal/seal`, `HEADERS_ENC_KEY`), envelope `$seal_v1` no jsonb; decifra só no engine (para a checagem) e no admin autenticado; público nunca vaza; fail-closed sem chave. | ✅ Aplicado em 2026 (tests + validação ao vivo no Postgres). |
 | S-06 | **Média** | **Credenciais default** (dev): `DB_PASSWORD=monitor`, `JWT_SECRET` raso em `.env.example`. | Gerar segredos fortes por ambiente; `JWT_SECRET` ≥ 32 bytes aleatórios; exigência já validada em `ENV=production`. |
 | S-07 | **Média** | **Imagens Docker com tag móvel** (`golang:1.27-alpine`, `distroless:static-debian12`, `nginx:1.25-alpine`, `postgres:15-alpine`) — cadeia de suprimentos. | Ancorar por **digest SHA** + `docker scout cves`/Trivy no CI; renovar imagem pelo digest atualizado (Dependabot/Renovate). |
 | S-08 | **Média** | **Limites de recurso por usuário** inexistentes: endpoint com `interval=1s` + muitos endpoints = auto-DoS (RF-007 sem teto). | Na Fase 3: rate limits por conta (máx. endpoints, intervalo mínimo, quota de checks/mês) → **429**. |
 | S-09 | **Baixa** | `server_name _;` + cert self-signed de exemplo; ciphers agora explícitos. | Produção: acme.sh/certbot com DNS-01, `server_name` real, HSTS preload. |
 | S-10 | **Baixa** | **Healthcheck de container trivial** (`/monitor health` retorna 0 sempre) — não verifica engine/DB. | Em produção usar probe HTTP `/healthz`+`/readyz` ou tornar `health` dependente do DB (com timeout). |
-| S-11 | **Baixa** | **Controle definitivo do SSRF** depende de defesa em profundidade. | Firewall de **egress** na VPS (nf_tables: só 80/443 externo; deny 169.254/16, RFC1918) + allowlist de IPs por conta na Fase 3. |
+| S-11 | **Baixa** | **Controle definitivo do SSRF** depende de defesa em profundidade. | Firewall de **egress** na VPS documentado no `deploy/README.md` (ufw/nf_tables: só 80/443 externo; deny metadata/RFC1918) + `ALLOW_PRIVATE_TARGETS=false` em produção. |
 | S-12 | **Info** | `endpoints.body`/`expect_body` podem conter recortes de payloads; `error_detail` logado. | Auditoria: nunca logar corpo/headers/body de endpoints em texto plano; redação em `slog` se necessário. |
 
 ---
@@ -89,9 +89,9 @@ go test -race ./...
 ## 6. Plano recomendado
 
 1. **[Aplicado]** Corrigir S-01..S-04 (SSRF guard, x/text, jitter, DropAll).
-2. **[Fase 3]** Aplicar S-05 (segredos cifrados), S-08 (limites por conta), S-11 (allowlist de IPs).
+2. **[Aplicado 2026]** **S-05** (headers cifrados em repouso — `internal/seal`, envelope `$seal_v1`) · resto da Fase 3: S-08 (limites por conta), S-11 (allowlist — coberto na infra do deploy).
 3. **[Projeto]** S-06/S-07/S-09/S-10 — hardening de produção (secrets fortes, digests, TLS real, healthcheck real).
-4. **[CI]** Adicionar govulncheck + gosec ao pipeline (RNF-021).
+4. **[Aplicado]** Adicionar govulncheck + gosec ao pipeline (RNF-021).
 
 ---
 
@@ -102,7 +102,7 @@ go test -race ./...
 | **Escopo**   | `auth` · `api` (CRUD/admin/stats/público/SSE) · `notifier` · migração 000002 |
 | **Data**     | Setembro/2026 (pós-implementação da Fase 3)            |
 | **Ferramentas** | `govulncheck` **0 chamáveis** · `gosec` **0 issues** · `go test -race` verde |
-| **Status**   | ✅ Correções aplicadas na própria revisão · ↩️ pendências herdadas S-05/S-08/S-11 |
+| **Status**   | ✅ Correções aplicadas na própria revisão · ↩️ herdados: S-08, S-11 (S-05 **resolvido** depois) |
 
 ## 7. Achados novos corrigidos na revisão da Fase 3
 

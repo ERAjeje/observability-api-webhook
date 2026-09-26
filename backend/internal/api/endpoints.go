@@ -12,6 +12,7 @@ import (
 
 	"monitor/internal/checker"
 	"monitor/internal/domain"
+	"monitor/internal/seal"
 	"monitor/internal/storage"
 )
 
@@ -72,7 +73,15 @@ func (b endpointBody) toEndpoint() (domain.Endpoint, error) {
 }
 
 // endpointDTO é a representação de saída (sem segredos fora do admin).
-func endpointDTO(e domain.Endpoint) map[string]any {
+// S-05: headers estão cifrados no store → descriptografa aqui (painel admin
+// autenticado). Fail-closed: erro de decifra → headers vazios (nunca vazam).
+func (s *Server) endpointDTO(e domain.Endpoint) map[string]any {
+	if seal.IsSealed(e.Headers) {
+		if _, err := seal.DecryptEndpointHeaders(&e, s.sealKey); err != nil {
+			slog.Warn("api: falha ao decifrar headers do endpoint", "endpoint", e.ID, "err", err)
+			e.Headers = map[string]string{}
+		}
+	}
 	return map[string]any{
 		"id":                   e.ID,
 		"group_id":             e.GroupID,
@@ -112,7 +121,7 @@ func (s *Server) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(eps))
 	for _, e := range eps {
-		out = append(out, endpointDTO(e))
+		out = append(out, s.endpointDTO(e))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -136,6 +145,12 @@ func (s *Server) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// S-05: cifra headers antes de persistir (AES-256-GCM em repouso).
+	if _, err := seal.EncryptEndpointHeaders(&e, s.sealKey); err != nil {
+		slog.Error("api: cifragem de headers falhou", "err", err)
+		writeErr(w, http.StatusInternalServerError, "falha ao persistir segredos")
+		return
+	}
 	id, err := s.store.CreateEndpoint(r.Context(), e)
 	if err != nil {
 		slog.Error("api: criar endpoint falhou", "err", err)
@@ -147,7 +162,7 @@ func (s *Server) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		s.logCreationSync(w, id)
 		return
 	}
-	writeJSON(w, http.StatusCreated, endpointDTO(e))
+	writeJSON(w, http.StatusCreated, s.endpointDTO(e))
 }
 
 func (s *Server) logCreationSync(w http.ResponseWriter, id int64) {
@@ -165,7 +180,7 @@ func (s *Server) getEndpoint(w http.ResponseWriter, r *http.Request) {
 	if mapStoreErr(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, endpointDTO(e))
+	writeJSON(w, http.StatusOK, s.endpointDTO(e))
 }
 
 // updateEndpoint edita e invalida o cache de agendamento (T3.2).
@@ -192,6 +207,12 @@ func (s *Server) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// S-05: cifra headers antes de persistir.
+	if _, err := seal.EncryptEndpointHeaders(&e, s.sealKey); err != nil {
+		slog.Error("api: cifragem de headers falhou", "endpoint", id, "err", err)
+		writeErr(w, http.StatusInternalServerError, "falha ao persistir segredos")
+		return
+	}
 	if err := s.store.UpdateEndpoint(r.Context(), e); mapStoreErr(w, err) {
 		if err != nil && !errors.Is(err, storage.ErrNotFound) {
 			slog.Error("api: atualizar endpoint falhou", "endpoint", id, "err", err)
@@ -204,7 +225,7 @@ func (s *Server) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 		e.Status = live.Status
 	}
 	_ = s.eng.SyncEndpoint(r.Context(), e)
-	writeJSON(w, http.StatusOK, endpointDTO(e))
+	writeJSON(w, http.StatusOK, s.endpointDTO(e))
 }
 
 // deleteEndpoint remove e notifica o engine (RNF-012).

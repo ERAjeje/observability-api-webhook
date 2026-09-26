@@ -27,14 +27,15 @@ type EngineHooks interface {
 
 // Config reúne as dependências do servidor HTTP.
 type Config struct {
-	Auth         *auth.Service
-	Broker       *broker.Broker
-	Settings     *settings.Service
-	Obs          *metrics.Registry // observabilidade — rota /metrics (RF-012)
-	SSEHeartbeat time.Duration
-	AllowPrivate bool // libera faixas internas no teste de conectividade
-	AuthRateMax  int
-	AuthRateWin  time.Duration
+	Auth          *auth.Service
+	Broker        *broker.Broker
+	Settings      *settings.Service
+	Obs           *metrics.Registry // observabilidade — rota /metrics (RF-012)
+	HeadersSecret []byte            // S-05 — cifrar headers em repouso (AES-GCM)
+	SSEHeartbeat  time.Duration
+	AllowPrivate  bool // libera faixas internas no teste de conectividade
+	AuthRateMax   int
+	AuthRateWin   time.Duration
 }
 
 // Server é o servidor HTTP da aplicação.
@@ -46,6 +47,7 @@ type Server struct {
 	broker       *broker.Broker
 	settings     *settings.Service
 	obs          *metrics.Registry
+	sealKey      []byte // S-05 — decifra headers no retorno ao admin
 	sseHeartbeat time.Duration
 	allowPrivate bool
 	authLimiter  *RateLimiter
@@ -64,6 +66,7 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 		broker:       cfg.Broker,
 		settings:     cfg.Settings,
 		obs:          cfg.Obs,
+		sealKey:      cfg.HeadersSecret,
 		sseHeartbeat: cfg.SSEHeartbeat,
 		allowPrivate: cfg.AllowPrivate,
 		authLimiter:  NewRateLimiter(cfg.AuthRateMax, cfg.AuthRateWin),

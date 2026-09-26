@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"monitor/internal/seal"
 )
 
 // Config concentra toda a configuração de runtime do monitor.
@@ -57,6 +59,11 @@ type Config struct {
 	NotifySuppression time.Duration
 	NotifyRetries     int
 	NotifyTimeout     time.Duration
+
+	// S-05 — cifragem dos headers dos endpoints em repouso (AES-256-GCM).
+	// nil = modo texto plano (dev). Em produção com blob cifrado no banco e
+	// chave ausente, o engine segue fail-closed (sem headers, sem vazar blob).
+	HeadersSecret []byte
 }
 
 // Load constrói a Config a partir do ambiente com defaults documentados em
@@ -93,6 +100,14 @@ func Load() (Config, error) {
 		NotifyRetries:       getInt("NOTIFY_RETRIES", 3),
 		NotifyTimeout:       time.Duration(getInt("NOTIFY_TIMEOUT_SECONDS", 5)) * time.Second,
 	}
+
+	// S-05: chave de cifragem dos headers (hex de 32 bytes). Erro → falha de
+	// boot em produção (nunca iniciar com chave inválida).
+	headersKey, err := seal.ParseKey(os.Getenv("HEADERS_ENC_KEY"))
+	if err != nil {
+		return cfg, err
+	}
+	cfg.HeadersSecret = headersKey
 
 	if cfg.WorkerPoolSize < 1 {
 		return cfg, fmt.Errorf("WORKER_POOL_SIZE deve ser >= 1 (got %d)", cfg.WorkerPoolSize)

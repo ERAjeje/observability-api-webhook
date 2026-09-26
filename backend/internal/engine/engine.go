@@ -16,6 +16,7 @@ import (
 	"monitor/internal/domain"
 	"monitor/internal/metrics"
 	"monitor/internal/scheduler"
+	"monitor/internal/seal"
 	"monitor/internal/storage"
 	"monitor/internal/worker"
 )
@@ -32,6 +33,7 @@ type Engine struct {
 	log     *slog.Logger
 	metrics *worker.Metrics
 	obs     *metrics.Registry // observabilidade (RF-012, RNF-011)
+	sealKey []byte            // S-05 — cifragem dos headers em repouso
 
 	mu       sync.Mutex
 	runtimes map[int64]*domain.EndpointRuntime
@@ -68,6 +70,7 @@ func New(ctx context.Context, cfg config.Config, store storage.Store, log *slog.
 		metrics:  &worker.Metrics{},
 		runtimes: map[int64]*domain.EndpointRuntime{},
 		flushSig: make(chan struct{}, 1),
+		sealKey:  cfg.HeadersSecret,
 	}
 
 	eps, err := store.ListEndpoints(ctx)
@@ -240,6 +243,14 @@ func (e *Engine) appendCheck(c domain.Check) {
 // handleJob é o ciclo completo por checagem (arquitetura §1.3, T2.5..T2.7).
 func (e *Engine) handleJob(parentCtx context.Context, job worker.Job) error {
 	ep := job.Endpoint
+	// S-05: headers ficam cifrados em repouso — descriptografa antes do
+	// checker. Fail-closed: sem chave com blob presente → segue sem headers,
+	// nunca vaza o blob descriptografado.
+	if _, err := seal.DecryptEndpointHeaders(&ep, e.sealKey); err != nil {
+		e.log.Error("engine: headers cifrados indisponíveis (fail-closed)",
+			"endpoint", ep.ID, "err", err)
+		ep.Headers = map[string]string{}
+	}
 	rt := e.runtime(ep.ID)
 	// Contexto derivado SOMENTE para a requisição HTTP (timeout do endpoint).
 	// Após o run, cancelamos e persistimos com o contexto pai (ainda vivo).

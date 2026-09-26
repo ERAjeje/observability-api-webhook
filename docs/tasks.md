@@ -179,3 +179,6 @@
   (`queue_depth`, `queue_starved_total`, jobs, in-flight), engine (checks por resultado, histograma de
   latência P50/P95, transições, eventos, incidentes), endpoints por estado e runtime Go. Logs já
   estruturados (slog). nginx expõe em `location = /metrics` (restrição por rede — S-11).
+- [x] **Hardening S-05** (headers em repouso): `internal/seal` AES-256-GCM (`HEADERS_ENC_KEY`, 64 hex),
+  envelope `$seal_v1` no jsonb; decifra no engine (checagem) e no admin autenticado; público nunca vaza
+  (RNF-018); update re-cifra; **fail-closed** sem chave com blob presente. Validado ao vivo no Postgres.
