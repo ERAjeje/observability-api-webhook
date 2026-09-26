@@ -43,7 +43,11 @@ type Server struct {
 	sseHeartbeat time.Duration
 	allowPrivate bool
 	authLimiter  *RateLimiter
+	sseSlots     chan struct{} // limite de streams SSE concorrentes
 }
+
+// maxSSEStreams limita conexões SSE simultâneas (mitigação de amplificação).
+const maxSSEStreams = 256
 
 // New monta as rotas da API (Fases 1-3).
 func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
@@ -59,6 +63,7 @@ func New(cfg Config, store storage.Store, eng EngineHooks) *Server {
 	if s.sseHeartbeat <= 0 {
 		s.sseHeartbeat = 15 * time.Second
 	}
+	s.sseSlots = make(chan struct{}, maxSSEStreams)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)

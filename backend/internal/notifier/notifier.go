@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -175,7 +176,6 @@ func (n *Notifier) dispatch(ctx context.Context, ev broker.Event, eventType, tex
 		"incident_id": ev.IncidentID,
 		"text":        text,
 		"timestamp":   ev.Timestamp,
-		"env":         n.cfg.SMTPFrom, // contexto para auditoria cross-ambiente
 	}
 	var wg sync.WaitGroup
 	if n.cfg.SMTPHost != "" && n.cfg.ToEmail != "" {
@@ -292,13 +292,19 @@ func (n *Notifier) sendEmail(ctx context.Context, text string) error {
 	}
 	defer client.Close()
 
-	// STARTTLS (porta 587/25) — nunca enviamos credenciais em claro.
+	// STARTTLS (porta 587/25). Fail-closed: só autenticamos em canal cifrado —
+	// nunca enviamos credenciais em claro.
+	tlsOK := false
 	if ok, _ := client.Extension("STARTTLS"); ok {
 		if err := client.StartTLS(tlsConfigFor(addr)); err != nil {
 			return fmt.Errorf("smtp: starttls: %w", err)
 		}
+		tlsOK = true
 	}
 	if n.cfg.SMTPUser != "" {
+		if !tlsOK {
+			return errors.New("smtp: recusa autenticar sem STARTTLS (fail-closed)")
+		}
 		auth := smtp.PlainAuth("", n.cfg.SMTPUser, n.cfg.SMTPPass, n.cfg.SMTPHost)
 		if err := client.Auth(auth); err != nil {
 			return fmt.Errorf("smtp: auth: %w", err)

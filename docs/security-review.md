@@ -92,3 +92,46 @@ go test -race ./...
 2. **[Fase 3]** Aplicar S-05 (segredos cifrados), S-08 (limites por conta), S-11 (allowlist de IPs).
 3. **[Projeto]** S-06/S-07/S-09/S-10 — hardening de produção (secrets fortes, digests, TLS real, healthcheck real).
 4. **[CI]** Adicionar govulncheck + gosec ao pipeline (RNF-021).
+
+---
+
+# Varredura #2 — Fase 3 (API REST + SSE + Notifier)
+
+| Campo        | Valor                                                  |
+|--------------|--------------------------------------------------------|
+| **Escopo**   | `auth` · `api` (CRUD/admin/stats/público/SSE) · `notifier` · migração 000002 |
+| **Data**     | Setembro/2026 (pós-implementação da Fase 3)            |
+| **Ferramentas** | `govulncheck` **0 chamáveis** · `gosec` **0 issues** · `go test -race` verde |
+| **Status**   | ✅ Correções aplicadas na própria revisão · ↩️ pendências herdadas S-05/S-08/S-11 |
+
+## 7. Achados novos corrigidos na revisão da Fase 3
+
+| ID | Severidade | Achado | Correção |
+|----|------------|--------|----------|
+| S-16 | **Alta** | **Panic em rotas admin** quando `JWT_SECRET` ausente/inválido (dev sem auth): `s.auth` nil → `requireAuth`/`login`/`signup` panics (500 vazio). | Guards: admin → **401**, auth → **503** "autenticação não configurada". |
+| S-17 | **Média** | **Credenciais SMTP em claro**: se o servidor não anunciasse `STARTTLS`, `auth` era tentado em texto puro. | **Fail-closed**: recusa autenticar sem TLS (`tlsOK` obrigatório quando há usuário). |
+| S-18 | **Média** | **Amplificação SSE**: clientes podiam abrir conexões `text/event-stream` sem limite (cada uma = subscrições + goroutines + canais). | `sseSlots` (semáforo de **256** streams) → **503** quando cheio. |
+| S-19 | **Baixa** | Payload de auditoria do notifier continha `env` preenchido com `SMTP_FROM` (campo com valor inesperado/enganoso no JSON). | Removido do payload; auditoria carrega só dados do evento. |
+| S-20 | **Baixa** | `headers` ausente no JSON de criação → `NULL` em `jsonb NOT NULL` (Pg) → **500** sem causa clara. | `toEndpoint` normaliza `nil → {}` + handlers **logam o erro do store** (client recebe erro genérico). |
+| S-21 | **Média** | Endpoint recém-criado por API tinha runtime com `status=""`; a state machine tratava `""` no `default` e **nunca persistia o status** (STATUS ficava `unknown` para sempre). | `normalizedStatus` (`""→unknown`) em `SyncEndpoint` e no reload; `MemStore` preserva status no update. |
+
+## 8. Verificações positivas da Fase 3 (confirmação)
+
+- **JWT**: algoritmo restrito a **HMAC** (anti *alg-confusion*), `WithExpirationRequired`, issuer fixo, chave ≥ 16 bytes validada.
+- **Senhas**: `bcrypt` cost 10; mínimo 8 chars e teto de 72 bytes; **respostas 401 genéricas** (sem enumeração de e-mail — RNF-019).
+- **Rate limit**: login/signup por **IP+e-mail** → **429** (RNF-017); nginx `limit_req` em `/api/`.
+- **SSRF**: a guarda do checker (S-01) é **reutilizada** no webhook do notifier e na **validação de escrita** de endpoints (ampla defesa).
+- **SSE**: eventos e snapshot **sem url/headers/body/password** (RNF-018); JSON snake_case consistente com a API.
+- **Input**: `MaxBytesReader(1 MiB)` + `DisallowUnknownFields` no decode.
+- **SMTP**: STARTTLS quando disponível; dial com timeout e deadline por operação; retry/backoff sem bloquear o worker (RNF-006).
+
+## 9. Pendências / riscos aceitos da Fase 3
+
+| ID | Severidade | Item | Ação |
+|----|------------|------|------|
+| S-22 | **Info** | `GO-2026-5932` (`x/crypto/openpgp` — "unsafe by design, sem fix"); **não é usado** (apenas `bcrypt`) e o govulncheck confirma "not called". | **Aceito** — monitorar; remover `x/crypto/openpgp` do build não se aplica (faz parte do módulo). |
+| S-23 | **Média** | **Single-tenant**: rotas admin são globais (sem ownership por usuário). OK para self-host; em multi-tenant haveria **IDOR**. | Documentar como decisão de produto; revisar antes de multiusuário. |
+| S-24 | **Info** | Rotação de `JWT_SECRET` e migração para **EdDSA/RS256** não implementadas (chave única HS256). | Roadmap de hardening p/ produção (VPS). |
+| S-05 | **Alta** | (herdado) Headers/tokens dos endpoints monitorados em **texto plano** no jsonb `headers`. | Cifrar em repouso ou externalizar; **nunca** retornar `headers` fora do admin. |
+| S-08 | **Média** | (herdado) Limites de recurso por conta (auto-DoS com muitos endpoints `interval=1s`). | Cotas na API admin (veio a frente da Fase 4). |
+| S-11 | **Média** | (herdado) Controle definitivo do SSRF = firewall de egress na VPS. | `nf_tables` no deploy (deny 169.254/16 e RFC1918 p/ o backend). |

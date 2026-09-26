@@ -26,6 +26,14 @@ func (s *Server) sseStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stream indisponível")
 		return
 	}
+	// Limite de streams concorrentes (anti-amplificação).
+	select {
+	case s.sseSlots <- struct{}{}:
+		defer func() { <-s.sseSlots }()
+	default:
+		writeErr(w, http.StatusServiceUnavailable, "muitos clientes conectados — tente novamente")
+		return
+	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, "sse: streaming não suportado")
@@ -39,7 +47,9 @@ func (s *Server) sseStream(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Snapshot atual (RNF-010 — reconexão sem divergência).
 	snap := s.snapshot(r)
-	writeSSE(w, "snapshot", snap)
+	if err := writeSSE(w, "snapshot", snap); err != nil {
+		return // cliente desconectou durante o snapshot
+	}
 	fl.Flush()
 
 	// 2. Assina todos os tópicos e funde os canais.
