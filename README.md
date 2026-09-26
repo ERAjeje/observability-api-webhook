@@ -60,7 +60,7 @@ cadastrados, logs de latência/status e **status page pública em tempo real**.
     conectividade), logs filtráveis/paginados, estatísticas, config de alertas
     e branding (settings dinâmicos, T4.5) e auditoria de notificações.
   - **E2E Playwright** — 4 cenários verdes contra a stack Docker (UC-01/UC-05).
-- **Fase 5 — Integração final + Hardening (S-05/S-08)**: CI (workflow + `make ci`), Deploy VPS
+- **Fase 5 — Integração final + Hardening (S-05/S-08)**: Verificação local (`make verify`), Deploy VPS
   (`deploy/provision.sh`, TLS acme.sh), **Sobrecarga** (800 endpoints em burst — corrigido um
   **double-run** real do scheduler com snapshot obsoleto), **Observabilidade** (`GET /metrics`
   Prometheus text) e hardening de segurança: **S-05** headers **cifrados em repouso** (AES-256-GCM,

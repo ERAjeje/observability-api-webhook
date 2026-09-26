@@ -44,7 +44,7 @@ revisão manual encontrou um **risco crítico de SSRF** no checker, já mitigado
 |----|------------|--------|--------------|
 | S-05 | **Alta (prod)** | ~~Headers dos endpoints monitorados em texto plano no jsonb~~ — **RESOLVIDO (hardening)**: cifragem AES-256-GCM em repouso (`internal/seal`, `HEADERS_ENC_KEY`), envelope `$seal_v1` no jsonb; decifra só no engine (para a checagem) e no admin autenticado; público nunca vaza; fail-closed sem chave. | ✅ Aplicado em 2026 (tests + validação ao vivo no Postgres). |
 | S-06 | **Média** | **Credenciais default** (dev): `DB_PASSWORD=monitor`, `JWT_SECRET` raso em `.env.example`. | Gerar segredos fortes por ambiente; `JWT_SECRET` ≥ 32 bytes aleatórios; exigência já validada em `ENV=production`. |
-| S-07 | **Média** | **Imagens Docker com tag móvel** (`golang:1.27-alpine`, `distroless:static-debian12`, `nginx:1.25-alpine`, `postgres:15-alpine`) — cadeia de suprimentos. | Ancorar por **digest SHA** + `docker scout cves`/Trivy no CI; renovar imagem pelo digest atualizado (Dependabot/Renovate). |
+| S-07 | **Média** | **Imagens Docker com tag móvel** (`golang:1.27-alpine`, `distroless:static-debian12`, `nginx:1.25-alpine`, `postgres:15-alpine`) — cadeia de suprimentos. | Ancorar por **digest SHA** na VPS + `docker scout cves`/Trivy na verificação local; renovar imagem pelo digest atualizado. |
 | S-08 | **Média** | ~~Limites de recurso por usuário inexistentes (auto-DoS com muitos endpoints `interval=1s`)~~ — **RESOLVIDO (hardening)**: cotas por conta na API admin. | ✅ Aplicado em 2026: `owner_id` nos endpoints (migração 000005) + `internal/quota` (máx. endpoints/conta, intervalo mínimo, projeção checks/mês) → **HTTP 429** no create/update. |
 | S-09 | **Baixa** | `server_name _;` + cert self-signed de exemplo; ciphers agora explícitos. | Produção: acme.sh/certbot com DNS-01, `server_name` real, HSTS preload. |
 | S-10 | **Baixa** | **Healthcheck de container trivial** (`/monitor health` retorna 0 sempre) — não verifica engine/DB. | Em produção usar probe HTTP `/healthz`+`/readyz` ou tornar `health` dependente do DB (com timeout). |
@@ -81,8 +81,8 @@ go run github.com/securego/gosec/v2/cmd/gosec@latest -fmt=text -quiet ./...
 go test -race ./...
 ```
 
-> Recomendação para o CI: adicionar `govulncheck` + `gosec` como jobs em `develop`/`main`
-> (alinhado ao RNF-021) — preferência em PRs.
+> Recomendação de verificação local (sem CI remoto): rodar `govulncheck` + `gosec` junto de
+> `go vet ./...` e `go test -race ./...` — consolidadas no `make verify`.
 
 ---
 
@@ -91,7 +91,7 @@ go test -race ./...
 1. **[Aplicado]** Corrigir S-01..S-04 (SSRF guard, x/text, jitter, DropAll).
 2. **[Aplicado 2026]** **S-05** (headers cifrados em repouso — `internal/seal`, envelope `$seal_v1`) e **S-08** (cotas por conta — `internal/quota`, `owner_id`, 429) · S-11 (allowlist — coberto na infra do deploy).
 3. **[Projeto]** S-06/S-07/S-09/S-10 — hardening de produção (secrets fortes, digests, TLS real, healthcheck real).
-4. **[Aplicado]** Adicionar govulncheck + gosec ao pipeline (RNF-021).
+4. **[Aplicado]** Adicionar govulncheck + gosec à verificação local (vet + tests -race).
 
 ---
 

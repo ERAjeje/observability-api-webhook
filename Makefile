@@ -1,6 +1,6 @@
 # Makefile — Central de Monitoramento (T1.9)
 
-.PHONY: help build test test-race lint run migrate-up migrate-down docker-up docker-down docker-logs frontend-build load-test ci clean
+.PHONY: help build test test-race lint run migrate-up migrate-down docker-up docker-down docker-logs frontend-build load-test load-test-pg verify clean
 
 help: ## Lista os alvos disponíveis
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -56,7 +56,7 @@ load-test-pg: ## Sobrecarga contra o PostgreSQL REAL (container efêmero) — va
 	cd backend && LOAD_TEST_PG_DSN='postgres://monitor:loadpg@127.0.0.1:55432/monitor?sslmode=disable' \
 	  go test -tags load ./internal/engine -run Load -v -count=1
 
-ci: ## Pipeline local de CI (vet + testes -race + build/audit frontend)
+verify: ## Verificação local completa (vet + testes -race + build/audit frontend) — sem nenhum serviço remoto
 	@set -e; \
 	printf "== go vet ==\n"; (cd backend && go vet ./...); \
 	printf "== go test -race ==\n"; (cd backend && go test -race ./...); \

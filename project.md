@@ -28,14 +28,14 @@ usuário, armazena **logs de latência/status** e fornece uma **página pública
 - Armazenamento de logs de latência/status por checagem.
 - Página pública de status em tempo real (SSE/WebSockets) com gráficos (uptime, latência, histórico).
 
-## 📌 Próximo passo — validar CI/Deploy reais (infra)
+## 📌 Próximo passo — Deploy na VPS (infra)
 
 ✅ **Fases 1–4 + Checklist + Hardening S-05/S-08** · ✅ Sobrecarga **memória e
 PostgreSQL real** (`make load-test-pg`) · ✅ Deploy validado por **smoke local**
-(`SKIP_TLS=1` — provision.sh end-to-end, sem infra). Restam — todos dependem
-de infraestrutura externa:
+(`SKIP_TLS=1` — provision.sh end-to-end, sem infra). **Sem GitHub Actions** —
+decisão de projeto: toda validação é local (`make verify` + load-tests + E2E).
+Restam (dependem de infraestrutura externa):
 
-- **[ ]** **Push para o remoto** → rodar o CI de verdade (GitHub Actions) e o **E2E em runner limpo**
 - **[ ]** **VPS**: executar `deploy/provision.sh` (TLS real via acme.sh, `DOMAIN`/`EMAIL`),
   validar operação + backups (RNF-003)
 - **[ ]** Segurança do `docs/security-review.md`: restam apenas pendências **de infra/produto** —
@@ -43,10 +43,11 @@ de infraestrutura externa:
   TLS real, healthcheck real) — **S-05 e S-08 resolvidos** em código, **S-11 coberto** na infra
   do `deploy/README.md`, **TLS self-signed** já coberto pelo smoke.
 
-> ⚠️ Ao publicar no remoto, remover certificados locais de `deploy/nginx/certs` (gitignored) e
-> garantir que `frontend/dist` esteja atualizado (`make frontend-build`).
+> ⚠️ Ao publicar num remoto (opcional, para backup), remover certificados locais de
+> `deploy/nginx/certs` (gitignored) e garantir que `frontend/dist` esteja atualizado
+> (`make frontend-build`).
 
 ## 📌 Decisões abertas (a definir durante o desenvolvimento)
 
-- CI/CD: GitHub Actions (workflow já incluído) vs GitLab CI (repo é local — decidir no push).
+- Source control remoto (opcional): rede/backup à escolha — sem CI anexado.
 - Multi-tenant vs single-tenant (rotas admin globais hoje — ver S-23 no security-review).

@@ -165,12 +165,12 @@
 
 ## Checklist Final de Integração
 
-- [x] **CI** verde para backend/frontend (lint, teste, build) (RNF-021): `.github/workflows/ci.yml`
-  (backend vet+tests-race+vulncheck · frontend build+audit · E2E na stack) e `make ci` local.
-  *Execução real depende do repo remoto (hoje local).*
+- [x] **Verificação local completa** (vet + testes `-race` + build/audit frontend + load-tests
+  memória/PostgreSQL + E2E Playwright na stack Docker): `make verify` centraliza vet/tests/build/
+  audit; **nenhum serviço remoto** é usado — decisão de projeto: sem GitHub Actions/ci-on-push.
 - [x] **Deploy** na VPS: `deploy/provision.sh` + `deploy/README.md` — Docker, `.env` com
   segredos aleatórios, frontend build, stack up e **TLS real via acme.sh** (RNF-003, RNF-016).
-  *Validação real depende da VPS; fluxo e script prontos.*
+  *Validação real depende da VPS; fluxo e script prontos (smoke `SKIP_TLS=1` validado).*
 - [x] **Sobrecarga** validada (`make load-test`): 800 endpoints em burst **processados exatamente 1×**
   com 0 drops e pico in-flight ≤ pool; backpressure (fila=8) → `queue_starved>0` e recuperação total
   sem deadlock. **Corrigido um double-run real durante a validação** (snapshot obsoleto do scheduler —
